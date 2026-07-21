@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+*.xcuserstate
+*.xcuserdatad
+*.xcuserdata
+xcuserdata/
+DerivedData/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.hmap
+*.ipa
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Build output
+dist/

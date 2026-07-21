@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ef">
+    <title>Token Watch</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Home">
+          <span>Usage</span>
+        </a>
+        <button class="refresh-button" id="refresh" type="button">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M16 6V2m0 0h-4m4 0-2.8 2.8A6 6 0 1 0 16 11"/>
+          </svg>
+          <span>Refresh</span>
+        </button>
+      </header>
+
+      <section class="intro">
+        <p class="eyebrow">Local usage monitor</p>
+        <h1>Usage, at a glance.</h1>
+        <p class="lede">Your current Claude, Codex, Gemini, and z.ai limits, read directly from this machine.</p>
+      </section>
+
+      <div class="notice" id="notice" role="status" aria-live="polite"></div>
+
+      <section class="provider-grid" aria-label="AI usage">
+        <article class="provider-card provider-card--claude" id="claude-card">
+          <header class="provider-header">
+            <div>
+              <div class="provider-name">
+                <span class="provider-dot"></span>
+                <h2>Claude</h2>
+              </div>
+              <p class="provider-detail">Loading local usage…</p>
+            </div>
+            <span class="provider-monogram" aria-hidden="true">Cl</span>
+          </header>
+          <div class="windows" data-windows></div>
+          <div class="model-windows" data-models></div>
+          <p class="card-cache" data-cache></p>
+        </article>
+
+        <article class="provider-card provider-card--codex" id="codex-card">
+          <header class="provider-header">
+            <div>
+              <div class="provider-name">
+                <span class="provider-dot"></span>
+                <h2>Codex</h2>
+              </div>
+              <p class="provider-detail">Loading local usage…</p>
+            </div>
+            <span class="provider-monogram" aria-hidden="true">Cx</span>
+          </header>
+          <div class="windows" data-windows></div>
+          <div class="model-windows" data-models></div>
+          <p class="card-cache" data-cache></p>
+        </article>
+
+        <article class="provider-card provider-card--gemini" id="gemini-card">
+          <header class="provider-header">
+            <div>
+              <div class="provider-name">
+                <span class="provider-dot"></span>
+                <h2>Gemini</h2>
+              </div>
+              <p class="provider-detail">Loading local usage…</p>
+            </div>
+            <span class="provider-monogram" aria-hidden="true">Gm</span>
+          </header>
+          <div class="windows" data-windows></div>
+          <div class="model-windows" data-models></div>
+          <label class="model-toggle">
+            <input type="checkbox" id="show-other-models" />
+            Show Claude and GPT model quotas
+          </label>
+          <p class="card-cache" data-cache></p>
+        </article>
+
+        <article class="provider-card provider-card--zai" id="zai-card">
+          <header class="provider-header">
+            <div>
+              <div class="provider-name">
+                <span class="provider-dot"></span>
+                <h2>z.ai</h2>
+              </div>
+              <p class="provider-detail">Loading local usage…</p>
+            </div>
+            <span class="provider-monogram" aria-hidden="true">Z</span>
+          </header>
+          <div class="windows" data-windows></div>
+          <div class="model-windows" data-models></div>
+          <p class="card-cache" data-cache></p>
+        </article>
+      </section>
+
+      <footer>
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="cache-status">Reading cached usage…</span>
+      </footer>
+    </main>
+  </body>
+</html>
