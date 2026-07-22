@@ -52,7 +52,7 @@ enum StatusItemFormatter {
 
         // 4. Optional pacing metric
         if let paceValue = UsagePacing.formattedDelta(for: snapshot.pacingWindow) {
-            metrics.append(StatusItemMetric(label: "pace", value: paceValue, isModelScoped: false))
+            metrics.append(StatusItemMetric(label: "p", value: paceValue, isModelScoped: false))
         }
 
         return StatusItemProviderUsage(name: name, metrics: metrics)

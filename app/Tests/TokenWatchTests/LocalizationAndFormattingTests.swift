@@ -49,7 +49,7 @@ import Testing
             weeklyReset: Date().addingTimeInterval(3.5 * 86_400)
         )
         let text = StatusItemFormatter.text(prefix: "Cl", snapshot: snap)
-        #expect(text.contains("pace"))
+        #expect(text.contains("p +") || text.contains("p −") || text.contains("p -"))
     }
 
     @Test func formatterMonthlyLabel() {
