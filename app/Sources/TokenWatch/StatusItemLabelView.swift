@@ -49,11 +49,7 @@ struct StatusItemLabelView: View {
     private func usagePill(for usage: StatusItemProviderUsage, color: Color) -> some View {
         HStack(spacing: 6) {
             ForEach(usage.metrics, id: \.label) { metric in
-                if metric.isModelScoped {
-                    modelScopedMetric(metric)
-                } else {
-                    standardMetric(metric)
-                }
+                standardMetric(metric)
             }
         }
         .padding(.horizontal, 8)
@@ -71,24 +67,6 @@ struct StatusItemLabelView: View {
                 .foregroundColor(.white)
                 .fixedSize()
         }
-    }
-
-    private func modelScopedMetric(_ metric: StatusItemMetric) -> some View {
-        HStack(spacing: 1) {
-            Text(metric.label)
-                .font(.system(size: 8, weight: .bold))
-                .foregroundColor(.white.opacity(0.7))
-            Text(metric.value)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white)
-                .fixedSize()
-        }
-        .padding(.horizontal, 3)
-        .padding(.vertical, 1)
-        .background(
-            RoundedRectangle(cornerRadius: 3)
-                .fill(.white.opacity(0.25))
-        )
     }
 
     private var fallbackPill: some View {
