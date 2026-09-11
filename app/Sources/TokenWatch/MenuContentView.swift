@@ -289,7 +289,9 @@ private struct PaceBadge: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            PulsingDot(color: color)
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
             Text(loc.insightMessage(delta: delta))
                 .font(.system(size: 10, weight: .medium))
         }
@@ -297,20 +299,6 @@ private struct PaceBadge: View {
         .padding(.vertical, 2)
         .background(Capsule().fill(color.opacity(0.15)))
         .foregroundStyle(color)
-    }
-}
-
-private struct PulsingDot: View {
-    let color: Color
-    @State private var pulsing = false
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 6, height: 6)
-            .opacity(pulsing ? 0.35 : 1)
-            .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulsing)
-            .onAppear { pulsing = true }
     }
 }
 
