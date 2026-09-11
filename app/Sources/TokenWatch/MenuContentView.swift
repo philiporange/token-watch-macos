@@ -50,15 +50,13 @@ private func countdownText(to date: Date, now: Date = Date()) -> String {
 struct MenuContentView: View {
     @ObservedObject var store: UsageStore
     let openSettings: () -> Void
-    let popoverHeight: CGFloat
 
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.english.rawValue
     @AppStorage("showGeminiOtherModels") private var showGeminiOtherModels = false
 
-    init(store: UsageStore, openSettings: @escaping () -> Void, popoverHeight: CGFloat) {
+    init(store: UsageStore, openSettings: @escaping () -> Void) {
         self.store = store
         self.openSettings = openSettings
-        self.popoverHeight = popoverHeight
     }
 
     private var loc: Loc {
@@ -68,11 +66,9 @@ struct MenuContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             cardStack
-            Spacer(minLength: 0)
             footer
         }
         .frame(width: 440)
-        .frame(height: popoverHeight, alignment: .top)
         .transaction { $0.animation = nil }
     }
 
@@ -94,7 +90,7 @@ struct MenuContentView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 16)
+        .padding(.vertical, 16)
     }
 
     private var emptyCard: some View {

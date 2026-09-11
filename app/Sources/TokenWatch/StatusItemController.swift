@@ -12,22 +12,6 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     // MARK: - Layout constants
 
-    private static let popoverWidth: CGFloat = 440
-
-    /// Fixed-height buckets for the popover, plus a per-model-window allowance.
-    static func popoverHeight(forVisibleSnapshotCount count: Int, modelWindowCount: Int = 0) -> CGFloat {
-        let base: CGFloat
-        switch count {
-        case ..<1: base = 208
-        case 1: base = 208
-        case 2: base = 348
-        case 3: base = 488
-        default: base = 628
-        }
-        let models = count == 0 ? 0 : modelWindowCount
-        return base + CGFloat(models) * 40
-    }
-
     /// The status-item length for a rendered content width: width + 12, floored at 32.
     static func statusItemLength(forContentWidth width: CGFloat) -> CGFloat {
         max(32, width + 12)
@@ -95,55 +79,21 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
 
-        let height = currentPopoverHeight()
-        let size = NSSize(width: Self.popoverWidth, height: height)
-        popover.contentSize = size
-
-        let hosting = NSHostingController(rootView: makeMenuContent(height: height))
-        hosting.sizingOptions = []
-        hosting.view.frame = NSRect(origin: .zero, size: size)
-        hosting.preferredContentSize = size
+        // The hosting controller reports the SwiftUI content's own size, and the
+        // popover follows it — no hand-computed height, so nothing gets clipped.
+        let hosting = NSHostingController(rootView: makeMenuContent())
+        hosting.sizingOptions = [.preferredContentSize]
         popover.contentViewController = hosting
         hostingController = hosting
     }
 
-    private func makeMenuContent(height: CGFloat) -> MenuContentView {
+    private func makeMenuContent() -> MenuContentView {
         MenuContentView(
             store: store,
             openSettings: { [openSettings] in
                 MainActor.assumeIsolated { openSettings() }
-            },
-            popoverHeight: height
+            }
         )
-    }
-
-    /// Height for the current visible snapshots, counting Gemini's model windows
-    /// only when the "showGeminiOtherModels" default is set.
-    private func currentPopoverHeight() -> CGFloat {
-        let snapshots = store.visibleSnapshots
-        let modelCount = snapshots.reduce(0) { $0 + modelWindowCount(for: $1) }
-        return Self.popoverHeight(forVisibleSnapshotCount: snapshots.count, modelWindowCount: modelCount)
-    }
-
-    private func modelWindowCount(for snapshot: ProviderSnapshot) -> Int {
-        if snapshot.provider == .gemini, !userDefaults.bool(forKey: "showGeminiOtherModels") {
-            return 0
-        }
-        return snapshot.modelWindows.count
-    }
-
-    /// Re-layout the popover, but only when its content size actually changed.
-    private func layoutPopover() {
-        let height = currentPopoverHeight()
-        let size = NSSize(width: Self.popoverWidth, height: height)
-        guard size != popover.contentSize else { return }
-
-        popover.contentSize = size
-        if let hosting = hostingController {
-            hosting.view.frame = NSRect(origin: .zero, size: size)
-            hosting.preferredContentSize = size
-            hosting.rootView = makeMenuContent(height: height)
-        }
     }
 
     // MARK: - Status item lifecycle
@@ -266,7 +216,6 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     private func refreshLabelAndLayout() {
         renderLabel()
-        layoutPopover()
     }
 
     // MARK: - Click handling
@@ -294,7 +243,6 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     private func showPopover() {
         guard let button = statusItem.button else { return }
         NSApp.activate(ignoringOtherApps: true)
-        layoutPopover()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         startDismissMonitoring()
     }
