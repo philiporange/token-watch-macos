@@ -1,8 +1,9 @@
 """Collect Claude usage with credentials maintained by the Claude Code CLI.
 
-Credentials are resolved from ``~/.claude/.credentials.json``, macOS Keychain,
-then ``CLAUDE_CODE_OAUTH_TOKEN``. Expiring refreshable credentials are renewed
-and persisted before calling Anthropic's OAuth usage endpoint.
+Credentials come from ``~/.claude/.credentials.json`` or the macOS Keychain --
+whichever is still live, so a stale file cannot shadow a valid Keychain entry --
+falling back to ``CLAUDE_CODE_OAUTH_TOKEN``. Expiring refreshable credentials
+are renewed and persisted before calling Anthropic's OAuth usage endpoint.
 """
 
 from copy import deepcopy
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import asyncio
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -25,6 +27,15 @@ from aipace_server.processes import find_executable, process_environment
 
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
+# Scopes the Claude CLI itself requests, used only when the stored credentials
+# do not record what they were granted. Sending a narrower fixed list would
+# down-scope the rotated token and strip capabilities from the CLI.
+DEFAULT_OAUTH_SCOPES = (
+    "user:profile",
+    "user:inference",
+    "user:sessions:claude_code",
+    "user:mcp_servers",
+)
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 REFRESH_BUFFER_MS = 5 * 60 * 1000
@@ -49,6 +60,7 @@ class ClaudeCredentials:
     subscription_type: str | None
     source: str
     full_data: dict[str, Any]
+    scopes: list[str] | None = None
 
 
 def _trimmed(value: Any) -> str | None:
@@ -85,17 +97,30 @@ class CredentialLoader:
         self.environment = environment if environment is not None else os.environ
 
     def resolve(self) -> ClaudeCredentials | None:
-        """Load credentials in the same priority order as native AIPace."""
+        """Load credentials, preferring whichever stored source is still live.
 
-        credentials = self._load_file()
-        if credentials is not None:
-            return credentials
+        File and Keychain are both read before choosing: a leftover
+        ``~/.claude/.credentials.json`` parses fine but can hold an expired
+        access token and an already-rotated refresh token, which would
+        otherwise shadow live Keychain credentials.
+        """
+
+        candidates: list[ClaudeCredentials] = []
+
+        file_credentials = self._load_file()
+        if file_credentials is not None:
+            candidates.append(file_credentials)
 
         keychain_error = None
         try:
-            credentials = self._load_keychain()
+            keychain_credentials = self._load_keychain()
         except ClaudeError as error:
             keychain_error = error
+        else:
+            if keychain_credentials is not None:
+                candidates.append(keychain_credentials)
+
+        credentials = self._freshest(candidates)
         if credentials is not None:
             return credentials
 
@@ -105,6 +130,27 @@ class CredentialLoader:
         if keychain_error is not None:
             raise keychain_error
         return None
+
+    def _freshest(
+        self, candidates: list[ClaudeCredentials]
+    ) -> ClaudeCredentials | None:
+        """Return the first candidate still live, else the one expiring latest.
+
+        Candidates arrive file-first, so equally fresh sources keep the file's
+        long-standing priority.
+        """
+
+        if not candidates:
+            return None
+        for candidate in candidates:
+            if not self.needs_refresh(candidate):
+                return candidate
+        return max(
+            candidates,
+            key=lambda candidate: (
+                candidate.expires_at if candidate.expires_at is not None else -math.inf
+            ),
+        )
 
     def needs_refresh(self, credentials: ClaudeCredentials) -> bool:
         """Return whether the token expires within the five-minute buffer."""
@@ -186,6 +232,12 @@ class CredentialLoader:
         access_token = _trimmed(oauth.get("accessToken"))
         if access_token is None:
             return None
+        raw_scopes = oauth.get("scopes")
+        scopes = (
+            [scope for scope in (_trimmed(item) for item in raw_scopes) if scope]
+            if isinstance(raw_scopes, list)
+            else None
+        )
         return ClaudeCredentials(
             access_token=access_token,
             refresh_token=_trimmed(oauth.get("refreshToken")),
@@ -193,17 +245,28 @@ class CredentialLoader:
             subscription_type=_trimmed(oauth.get("subscriptionType")),
             source=source,
             full_data=root,
+            scopes=scopes or None,
         )
 
     def _updated_root(self, credentials: ClaudeCredentials) -> dict[str, Any]:
         root = deepcopy(credentials.full_data)
-        oauth: dict[str, Any] = {"accessToken": credentials.access_token}
-        if credentials.refresh_token is not None:
-            oauth["refreshToken"] = credentials.refresh_token
-        if credentials.expires_at is not None:
-            oauth["expiresAt"] = credentials.expires_at
-        if credentials.subscription_type is not None:
-            oauth["subscriptionType"] = credentials.subscription_type
+        # Write over the managed fields only. Rebuilding the block from scratch
+        # would drop siblings the Claude CLI relies on, such as
+        # ``refreshTokenExpiresAt`` and ``rateLimitTier``.
+        existing = root.get("claudeAiOauth")
+        oauth: dict[str, Any] = deepcopy(existing) if isinstance(existing, dict) else {}
+        oauth["accessToken"] = credentials.access_token
+        for key, value in (
+            ("refreshToken", credentials.refresh_token),
+            ("expiresAt", credentials.expires_at),
+            ("subscriptionType", credentials.subscription_type),
+        ):
+            if value is not None:
+                oauth[key] = value
+            else:
+                oauth.pop(key, None)
+        if credentials.scopes:
+            oauth["scopes"] = list(credentials.scopes)
         root["claudeAiOauth"] = oauth
         return root
 
@@ -294,6 +357,12 @@ def _parse_date(value: Any) -> datetime | None:
     return result if result.tzinfo else result.replace(tzinfo=timezone.utc)
 
 
+def _refresh_scope(credentials: ClaudeCredentials) -> str:
+    """Replay the grant's own scopes so a rotated token is never narrowed."""
+
+    return " ".join(credentials.scopes or DEFAULT_OAUTH_SCOPES)
+
+
 async def _refresh_credentials(
     credentials: ClaudeCredentials,
     loader: CredentialLoader,
@@ -309,7 +378,7 @@ async def _refresh_credentials(
             "grant_type": "refresh_token",
             "refresh_token": credentials.refresh_token,
             "client_id": CLIENT_ID,
-            "scope": "user:profile user:inference user:sessions:claude_code",
+            "scope": _refresh_scope(credentials),
         },
     )
     if response.status_code in (400, 401):
@@ -336,6 +405,9 @@ async def _refresh_credentials(
     expires_in = _numeric(payload.get("expires_in"))
     if expires_in is not None:
         credentials.expires_at = time.time() * 1000 + expires_in * 1000
+    granted = _trimmed(payload.get("scope"))
+    if granted is not None:
+        credentials.scopes = granted.split()
     loader.save(credentials)
     return credentials
 

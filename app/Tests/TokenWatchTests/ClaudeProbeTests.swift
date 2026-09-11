@@ -216,4 +216,43 @@ private actor AuthRetryState {
         #expect(probe.shouldRetryAfterAuthenticationError(.invalidResponse("other")) == false)
         #expect(probe.shouldRetryAfterAuthenticationError(.executableNotFound("claude")) == false)
     }
+
+    // MARK: - Refresh scope
+
+    private func credentials(scopes: [String]?) -> ClaudeCredentialResult {
+        ClaudeCredentialResult(
+            oauth: ClaudeOAuthCredentials(
+                accessToken: "AT",
+                refreshToken: "RT",
+                expiresAt: nil,
+                subscriptionType: nil,
+                scopes: scopes
+            ),
+            source: .keychain,
+            fullData: [:]
+        )
+    }
+
+    /// The grant's own scopes are replayed, so a rotated token is never narrowed.
+    @Test func refreshScopeReplaysStoredScopes() {
+        let stored = ["user:profile", "user:inference", "user:mcp_servers", "user:file_upload"]
+        #expect(ClaudeProbe.refreshScope(for: credentials(scopes: stored)) == stored.joined(separator: " "))
+    }
+
+    /// Older credential blobs record no scopes; fall back to what the CLI asks for.
+    @Test func refreshScopeFallsBackToDefaultScopes() {
+        let expected = ClaudeProbe.defaultOAuthScopes.joined(separator: " ")
+        #expect(ClaudeProbe.refreshScope(for: credentials(scopes: nil)) == expected)
+        #expect(ClaudeProbe.refreshScope(for: credentials(scopes: [])) == expected)
+        #expect(ClaudeProbe.defaultOAuthScopes.contains("user:mcp_servers"))
+    }
+
+    @Test func refreshResponseGrantedScopesSplitsOnWhitespace() throws {
+        let json = #"{"access_token":"A","scope":"user:profile user:mcp_servers"}"#
+        let decoded = try JSONDecoder().decode(ClaudeRefreshResponse.self, from: Data(json.utf8))
+        #expect(decoded.grantedScopes == ["user:profile", "user:mcp_servers"])
+
+        let without = try JSONDecoder().decode(ClaudeRefreshResponse.self, from: Data(#"{"access_token":"A"}"#.utf8))
+        #expect(without.grantedScopes == nil)
+    }
 }

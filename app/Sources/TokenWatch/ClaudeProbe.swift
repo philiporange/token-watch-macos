@@ -179,8 +179,8 @@ struct ClaudeProbe: @unchecked Sendable {
         let requestBody: [String: String] = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken,
-            "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-            "scope": "user:profile user:inference user:sessions:claude_code"
+            "client_id": oauthClientID,
+            "scope": refreshScope(for: credentials)
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
@@ -216,6 +216,10 @@ struct ClaudeProbe: @unchecked Sendable {
 
         if let expiresIn = refreshResponse.expiresIn {
             updated.oauth.expiresAt = Date().timeIntervalSince1970 * 1000 + Double(expiresIn) * 1000
+        }
+
+        if let grantedScopes = refreshResponse.grantedScopes, !grantedScopes.isEmpty {
+            updated.oauth.scopes = grantedScopes
         }
 
         credentialLoader.saveCredentials(updated)
@@ -263,6 +267,25 @@ struct ClaudeProbe: @unchecked Sendable {
                 "Claude usage endpoint returned HTTP \(httpResponse.statusCode)."
             )
         }
+    }
+
+    /// The scopes the Claude CLI itself requests. Used only when the stored
+    /// credentials do not record what they were granted.
+    static let defaultOAuthScopes = [
+        "user:profile",
+        "user:inference",
+        "user:sessions:claude_code",
+        "user:mcp_servers"
+    ]
+
+    static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+
+    /// Replay the grant's own scopes on refresh. Sending a narrower fixed list
+    /// down-scopes the rotated token, which is then written back to the shared
+    /// credential store and quietly strips capabilities from the Claude CLI.
+    static func refreshScope(for credentials: ClaudeCredentialResult) -> String {
+        let scopes = credentials.oauth.scopes ?? []
+        return (scopes.isEmpty ? defaultOAuthScopes : scopes).joined(separator: " ")
     }
 
     private static let credentialsNotFoundMessage = "Claude credentials not found."
@@ -490,11 +513,20 @@ struct ClaudeRefreshResponse: Decodable, Sendable {
     let accessToken: String?
     let refreshToken: String?
     let expiresIn: Int?
+    let scope: String?
+
+    /// The echoed `scope` split into individual scopes, or nil when absent.
+    var grantedScopes: [String]? {
+        guard let scope else { return nil }
+        let parts = scope.split(whereSeparator: \.isWhitespace).map(String.init)
+        return parts.isEmpty ? nil : parts
+    }
 
     private enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case expiresIn = "expires_in"
+        case scope
     }
 }
 

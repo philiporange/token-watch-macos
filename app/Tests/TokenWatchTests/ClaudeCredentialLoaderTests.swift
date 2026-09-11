@@ -213,4 +213,123 @@ import Testing
         loader.saveCredentials(result)
         #expect(FileManager.default.fileExists(atPath: credentialsURL(home: home).path) == false)
     }
+
+    // MARK: - Source freshness
+
+    private func keychainResult(
+        accessToken: String = "KC",
+        expiresAt: Double?,
+        scopes: [String]? = nil
+    ) -> ClaudeCredentialResult {
+        ClaudeCredentialResult(
+            oauth: ClaudeOAuthCredentials(
+                accessToken: accessToken,
+                refreshToken: "KCRT",
+                expiresAt: expiresAt,
+                subscriptionType: nil,
+                scopes: scopes
+            ),
+            source: .keychain,
+            fullData: [:]
+        )
+    }
+
+    /// A leftover credentials file must not shadow live Keychain credentials.
+    @Test func keychainWinsWhenFileCredentialsAreExpired() throws {
+        let home = try makeTemporaryDirectory()
+        try writeCredentialsFile(
+            home: home,
+            json: #"{"claudeAiOauth":{"accessToken":"STALE","refreshToken":"DEAD","expiresAt":1700000000000}}"#
+        )
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        let loader = ClaudeCredentialLoader(
+            homeDirectory: home,
+            environment: [:],
+            keychainLoadOverride: .success(keychainResult(expiresAt: nowMs + 3_600_000))
+        )
+
+        let result = try #require(loader.loadCredentials())
+        #expect(result.source == .keychain)
+        #expect(result.oauth.accessToken == "KC")
+    }
+
+    /// When both sources are usable the file keeps its long-standing priority.
+    @Test func fileWinsWhenBothSourcesAreFresh() throws {
+        let home = try makeTemporaryDirectory()
+        let nowMs = Date().timeIntervalSince1970 * 1000
+        try writeCredentialsFile(
+            home: home,
+            json: #"{"claudeAiOauth":{"accessToken":"AT","expiresAt":\#(nowMs + 3_600_000)}}"#
+        )
+        let loader = ClaudeCredentialLoader(
+            homeDirectory: home,
+            environment: [:],
+            keychainLoadOverride: .success(keychainResult(expiresAt: nowMs + 7_200_000))
+        )
+
+        let result = try #require(loader.loadCredentials())
+        #expect(result.source == .file)
+    }
+
+    /// With nothing usable, the candidate expiring latest is the best refresh bet.
+    @Test func latestExpiryWinsWhenBothSourcesAreStale() throws {
+        let home = try makeTemporaryDirectory()
+        try writeCredentialsFile(
+            home: home,
+            json: #"{"claudeAiOauth":{"accessToken":"STALE","expiresAt":1700000000000}}"#
+        )
+        let loader = ClaudeCredentialLoader(
+            homeDirectory: home,
+            environment: [:],
+            keychainLoadOverride: .success(keychainResult(expiresAt: 1_800_000_000_000))
+        )
+
+        let result = try #require(loader.loadCredentials())
+        #expect(result.source == .keychain)
+    }
+
+    // MARK: - Scopes
+
+    @Test func scopesParsedFromStoredCredentials() throws {
+        let home = try makeTemporaryDirectory()
+        try writeCredentialsFile(
+            home: home,
+            json: #"{"claudeAiOauth":{"accessToken":"AT","scopes":["user:profile","user:mcp_servers"]}}"#
+        )
+        let loader = ClaudeCredentialLoader(homeDirectory: home, environment: [:], keychainLoadOverride: .success(nil))
+        let result = try #require(loader.loadCredentials())
+        #expect(result.oauth.scopes == ["user:profile", "user:mcp_servers"])
+    }
+
+    @Test func absentScopesParseAsNil() throws {
+        let home = try makeTemporaryDirectory()
+        try writeCredentialsFile(home: home, json: #"{"claudeAiOauth":{"accessToken":"AT"}}"#)
+        let loader = ClaudeCredentialLoader(homeDirectory: home, environment: [:], keychainLoadOverride: .success(nil))
+        let result = try #require(loader.loadCredentials())
+        #expect(result.oauth.scopes == nil)
+    }
+
+    /// Saving must not strip sibling keys the Claude CLI relies on.
+    @Test func saveKeepsSiblingOAuthKeys() throws {
+        let home = try makeTemporaryDirectory()
+        try writeCredentialsFile(
+            home: home,
+            json: #"""
+            {"claudeAiOauth":{"accessToken":"AT","refreshToken":"RT","scopes":["user:profile","user:mcp_servers"],"refreshTokenExpiresAt":1788033826690,"rateLimitTier":"default_claude_max_20x"}}
+            """#
+        )
+        let loader = ClaudeCredentialLoader(homeDirectory: home, environment: [:], keychainLoadOverride: .success(nil))
+        var result = try #require(loader.loadCredentials())
+        result.oauth.accessToken = "ROTATED"
+        loader.saveCredentials(result)
+
+        let data = try Data(contentsOf: credentialsURL(home: home))
+        let oauth = try #require(
+            (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["claudeAiOauth"] as? [String: Any]
+        )
+        #expect(oauth["accessToken"] as? String == "ROTATED")
+        #expect(oauth["scopes"] as? [String] == ["user:profile", "user:mcp_servers"])
+        #expect(oauth["refreshTokenExpiresAt"] as? Double == 1_788_033_826_690)
+        #expect(oauth["rateLimitTier"] as? String == "default_claude_max_20x")
+    }
 }
