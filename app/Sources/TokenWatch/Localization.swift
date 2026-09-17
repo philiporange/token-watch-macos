@@ -423,13 +423,13 @@ struct Loc {
 
     var providersDesc: String {
         switch lang {
-        case .english: return "Codex uses codex app-server. Claude, Gemini, and Muse read local CLI credentials; Gemini uses agy's quota service. AliCloud reads the Model Studio console session from Muon."
-        case .spanish: return "Codex usa codex app-server. Claude, Gemini y Muse leen credenciales locales de la CLI; Gemini usa el servicio de cuotas de agy. AliCloud lee la sesión de la consola Model Studio desde Muon."
-        case .french: return "Codex utilise codex app-server. Claude, Gemini et Muse lisent les identifiants CLI locaux ; Gemini utilise le service de quota d'agy. AliCloud lit la session de la console Model Studio depuis Muon."
-        case .german: return "Codex verwendet codex app-server. Claude, Gemini und Muse lesen lokale CLI-Zugangsdaten; Gemini nutzt den Quota-Dienst von agy. AliCloud liest die Model-Studio-Konsolensitzung aus Muon."
-        case .japanese: return "Codexはcodex app-serverを使用します。Claude、Gemini、MuseはローカルのCLI資格情報を読み込みます。Geminiはagyのクォータサービスを使用します。AliCloudはMuonのModel Studioコンソールセッションを読み込みます。"
-        case .korean: return "Codex는 codex app-server를 사용합니다. Claude, Gemini 및 Muse는 로컬 CLI 자격 증명을 읽고, Gemini는 agy의 할당량 서비스를 사용합니다. AliCloud는 Muon의 Model Studio 콘솔 세션을 읽습니다."
-        case .chineseSimplified: return "Codex 使用 codex app-server。Claude、Gemini 和 Muse 读取本地 CLI 凭据；Gemini 使用 agy 的配额服务。AliCloud 从 Muon 读取 Model Studio 控制台会话。"
+        case .english: return "Codex uses codex app-server. Claude, Gemini, Muse, and Command Code read local CLI credentials; Gemini uses agy's quota service. AliCloud reads the Model Studio console session from Muon."
+        case .spanish: return "Codex usa codex app-server. Claude, Gemini, Muse y Command Code leen credenciales locales de la CLI; Gemini usa el servicio de cuotas de agy. AliCloud lee la sesión de la consola Model Studio desde Muon."
+        case .french: return "Codex utilise codex app-server. Claude, Gemini, Muse et Command Code lisent les identifiants CLI locaux ; Gemini utilise le service de quota d'agy. AliCloud lit la session de la console Model Studio depuis Muon."
+        case .german: return "Codex verwendet codex app-server. Claude, Gemini, Muse und Command Code lesen lokale CLI-Zugangsdaten; Gemini nutzt den Quota-Dienst von agy. AliCloud liest die Model-Studio-Konsolensitzung aus Muon."
+        case .japanese: return "Codexはcodex app-serverを使用します。Claude、Gemini、Muse、Command CodeはローカルのCLI資格情報を読み込みます。Geminiはagyのクォータサービスを使用します。AliCloudはMuonのModel Studioコンソールセッションを読み込みます。"
+        case .korean: return "Codex는 codex app-server를 사용합니다. Claude, Gemini, Muse 및 Command Code는 로컬 CLI 자격 증명을 읽고, Gemini는 agy의 할당량 서비스를 사용합니다. AliCloud는 Muon의 Model Studio 콘솔 세션을 읽습니다."
+        case .chineseSimplified: return "Codex 使用 codex app-server。Claude、Gemini、Muse 和 Command Code 读取本地 CLI 凭据；Gemini 使用 agy 的配额服务。AliCloud 从 Muon 读取 Model Studio 控制台会话。"
         }
     }
 
@@ -833,6 +833,16 @@ struct Loc {
             case .japanese: return "Model Studioコンソールに再度サインインし、更新してください。"
             case .korean: return "Model Studio 콘솔에 다시 로그인한 후 새로고침하세요."
             case .chineseSimplified: return "重新登录 Model Studio 控制台，然后刷新。"
+            }
+        case (.commandCode, .missingAuth), (.commandCode, .notLoggedIn), (.commandCode, .sessionExpired):
+            switch lang {
+            case .english: return "Run `command-code` in Terminal and sign in, then refresh."
+            case .spanish: return "Ejecuta `command-code` en la Terminal e inicia sesión, luego actualiza."
+            case .french: return "Exécutez `command-code` dans le Terminal et connectez-vous, puis actualisez."
+            case .german: return "Führe `command-code` im Terminal aus und melde dich an, danach aktualisieren."
+            case .japanese: return "ターミナルで `command-code` を実行してサインインし、更新してください。"
+            case .korean: return "터미널에서 `command-code`를 실행하여 로그인한 후 새로고침하세요."
+            case .chineseSimplified: return "在终端中运行 `command-code` 并登录，然后刷新。"
             }
         default:
             return nil

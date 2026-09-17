@@ -11,6 +11,7 @@ extension GeminiProbe: ProviderSnapshotFetching {}
 extension ZaiProbe: ProviderSnapshotFetching {}
 extension MuseProbe: ProviderSnapshotFetching {}
 extension AliCloudProbe: ProviderSnapshotFetching {}
+extension CommandCodeProbe: ProviderSnapshotFetching {}
 
 private struct MissingGeminiSnapshotFetcher: ProviderSnapshotFetching {
     func fetch() async -> ProviderSnapshot {
@@ -56,6 +57,17 @@ private struct MissingAliCloudSnapshotFetcher: ProviderSnapshotFetching {
     }
 }
 
+private struct MissingCommandCodeSnapshotFetcher: ProviderSnapshotFetching {
+    func fetch() async -> ProviderSnapshot {
+        let message = CommandCodeError.credentialsNotFound.localizedDescription
+        return ProviderSnapshot(
+            provider: .commandCode,
+            fiveHour: .placeholder(.fiveHour, message: message),
+            weekly: .placeholder(.weekly, message: message)
+        )
+    }
+}
+
 @MainActor
 final class UsageStore: ObservableObject {
     private static let autoRefreshIntervalKey = "autoRefreshInterval"
@@ -66,6 +78,7 @@ final class UsageStore: ObservableObject {
     @Published var zai: ProviderSnapshot = .loading(.zai)
     @Published var muse: ProviderSnapshot = .loading(.muse)
     @Published var alicloud: ProviderSnapshot = .loading(.alicloud)
+    @Published var commandCode: ProviderSnapshot = .loading(.commandCode)
 
     @Published var lastUpdated: Date?
     @Published var lastUpdatedByProvider: [ProviderKind: Date] = [:]
@@ -81,6 +94,7 @@ final class UsageStore: ObservableObject {
     private let zaiProbe: any ProviderSnapshotFetching
     private let museProbe: any ProviderSnapshotFetching
     private let alicloudProbe: any ProviderSnapshotFetching
+    private let commandCodeProbe: any ProviderSnapshotFetching
     private let launchAtStartupManager: any LaunchAtStartupManaging
     private let userDefaults: UserDefaults
 
@@ -94,6 +108,7 @@ final class UsageStore: ObservableObject {
         zaiProbe: any ProviderSnapshotFetching = MissingZaiSnapshotFetcher(),
         museProbe: any ProviderSnapshotFetching = MissingMuseSnapshotFetcher(),
         alicloudProbe: any ProviderSnapshotFetching = MissingAliCloudSnapshotFetcher(),
+        commandCodeProbe: any ProviderSnapshotFetching = MissingCommandCodeSnapshotFetcher(),
         launchAtStartupManager: any LaunchAtStartupManaging = LaunchAtStartupManager(),
         userDefaults: UserDefaults = .standard,
         startRefreshLoop: Bool = true
@@ -104,6 +119,7 @@ final class UsageStore: ObservableObject {
         self.zaiProbe = zaiProbe
         self.museProbe = museProbe
         self.alicloudProbe = alicloudProbe
+        self.commandCodeProbe = commandCodeProbe
         self.launchAtStartupManager = launchAtStartupManager
         self.userDefaults = userDefaults
 
@@ -125,7 +141,8 @@ final class UsageStore: ObservableObject {
             geminiProbe: GeminiProbe(),
             zaiProbe: ZaiProbe(),
             museProbe: MuseProbe(),
-            alicloudProbe: AliCloudProbe()
+            alicloudProbe: AliCloudProbe(),
+            commandCodeProbe: CommandCodeProbe()
         )
     }
 
@@ -229,7 +246,7 @@ final class UsageStore: ObservableObject {
         let availability: AgentAvailability
 
         switch provider {
-        case .claude, .gemini, .muse, .alicloud:
+        case .claude, .gemini, .muse, .alicloud, .commandCode:
             if lowercasedMessage.contains("credentials not found") ||
                 lowercasedMessage.contains("credentials could not be read") {
                 availability = .missingAuth
@@ -264,7 +281,7 @@ final class UsageStore: ObservableObject {
     }
 
     private var providerSnapshots: [ProviderSnapshot] {
-        [claude, codex, gemini, zai, muse, alicloud]
+        [claude, codex, gemini, zai, muse, alicloud, commandCode]
     }
 
     private func snapshot(for provider: ProviderKind) -> ProviderSnapshot {
@@ -281,6 +298,8 @@ final class UsageStore: ObservableObject {
             muse
         case .alicloud:
             alicloud
+        case .commandCode:
+            commandCode
         }
     }
 
@@ -298,6 +317,8 @@ final class UsageStore: ObservableObject {
             muse = snapshot
         case .alicloud:
             alicloud = snapshot
+        case .commandCode:
+            commandCode = snapshot
         }
     }
 
@@ -315,6 +336,8 @@ final class UsageStore: ObservableObject {
             museProbe
         case .alicloud:
             alicloudProbe
+        case .commandCode:
+            commandCodeProbe
         }
     }
 

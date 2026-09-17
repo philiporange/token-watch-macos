@@ -19,6 +19,9 @@ enum AppTheme {
     /// A teal accent for AliCloud
     static let alicloudAccent: Color = Color(red: 0.06, green: 0.55, blue: 0.55)
 
+    /// A rose accent for Command Code
+    static let commandCodeAccent: Color = Color(red: 0.80, green: 0.22, blue: 0.48)
+
     /// Returns the accent color for the given provider.
     /// - Parameter provider: The provider kind to get the accent for
     /// - Returns: The accent color associated with the provider
@@ -36,6 +39,8 @@ enum AppTheme {
             return museAccent
         case .alicloud:
             return alicloudAccent
+        case .commandCode:
+            return commandCodeAccent
         }
     }
 }

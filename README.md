@@ -6,9 +6,9 @@
 
 **A macOS menu bar app that shows your AI usage.**
 
-Token Watch shows current Claude, Codex, Gemini, z.ai, Muse, and AliCloud Token Plan usage in your Mac's menu bar, including model-scoped limits and pacing insights. It uses your existing local credentials — nothing extra to sign in to, no telemetry, no backend; requests go straight from your Mac to each provider.
+Token Watch shows current Claude, Codex, Gemini, z.ai, Muse, AliCloud Token Plan, and Command Code usage in your Mac's menu bar, including model-scoped limits and pacing insights. It uses your existing local credentials — nothing extra to sign in to, no telemetry, no backend; requests go straight from your Mac to each provider.
 
-> Unofficial; not affiliated with Anthropic, OpenAI, Google, Z.ai, Meta, or Alibaba Cloud. Forked from [AIPace](https://github.com/lbybrilee/ai-pace).
+> Unofficial; not affiliated with Anthropic, OpenAI, Google, Z.ai, Meta, Alibaba Cloud, or Command Code. Forked from [AIPace](https://github.com/lbybrilee/ai-pace).
 
 ## Install
 
@@ -36,6 +36,7 @@ Each provider appears once its local credentials are found:
 | z.ai | `ZAI_API_KEY` in the environment or `~/.env` |
 | Muse | `muse login`: Keychain (`ai.meta.dev.credentials`), or `~/.config/muse/auth.json` |
 | AliCloud | Model Studio console login in Muon (`login_aliyunid_ticket` cookie), or `ALICLOUD_CONSOLE_TICKET` in the environment or `~/.env` |
+| Command Code | `command-code` login: `~/.commandcode/auth.json`, or `COMMANDCODE_API_KEY` |
 
 Approve the Keychain prompt if macOS asks — that's Token Watch reading your existing CLI credentials. Some quota endpoints are undocumented and may change without notice. Alibaba Cloud exposes no usage API for Token Plan keys, so Token Watch reads the console's internal gateway with your console session; the plan key alone is not enough.
 

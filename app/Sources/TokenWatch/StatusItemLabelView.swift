@@ -9,6 +9,7 @@ struct StatusItemLabelView: View {
     let zaiUsage: StatusItemProviderUsage?
     let museUsage: StatusItemProviderUsage?
     let alicloudUsage: StatusItemProviderUsage?
+    let commandCodeUsage: StatusItemProviderUsage?
 
     nonisolated static func resolvedFallbackText(
         claudeText: String?,
@@ -16,9 +17,10 @@ struct StatusItemLabelView: View {
         geminiText: String? = nil,
         zaiText: String? = nil,
         museText: String? = nil,
-        alicloudText: String? = nil
+        alicloudText: String? = nil,
+        commandCodeText: String? = nil
     ) -> String? {
-        let allNilOrBlank = [claudeText, codexText, geminiText, zaiText, museText, alicloudText].allSatisfy { text in
+        let allNilOrBlank = [claudeText, codexText, geminiText, zaiText, museText, alicloudText, commandCodeText].allSatisfy { text in
             guard let text = text else { return true }
             return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -46,8 +48,11 @@ struct StatusItemLabelView: View {
             if let alicloud = alicloudUsage {
                 usagePill(for: alicloud, color: AppTheme.alicloudAccent)
             }
+            if let commandCode = commandCodeUsage {
+                usagePill(for: commandCode, color: AppTheme.commandCodeAccent)
+            }
 
-            if claudeUsage == nil && codexUsage == nil && geminiUsage == nil && zaiUsage == nil && museUsage == nil && alicloudUsage == nil {
+            if claudeUsage == nil && codexUsage == nil && geminiUsage == nil && zaiUsage == nil && museUsage == nil && alicloudUsage == nil && commandCodeUsage == nil {
                 fallbackPill
             }
         }
