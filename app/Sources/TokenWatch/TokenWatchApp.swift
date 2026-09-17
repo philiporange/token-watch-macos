@@ -21,6 +21,7 @@ struct TokenWatchApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var optionsWindowController: OptionsWindowController?
+    private var usageAPIServer: UsageAPIServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -29,11 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func configureIfNeeded(store: UsageStore) {
         guard statusItemController == nil else { return }
 
+        let apiServer = UsageAPIServer(store: store)
+        usageAPIServer = apiServer
+
         let openSettings: @MainActor () -> Void = { [weak self] in
             guard let self else { return }
 
             if self.optionsWindowController == nil {
-                self.optionsWindowController = OptionsWindowController(store: store)
+                self.optionsWindowController = OptionsWindowController(store: store, apiServer: apiServer)
             }
             self.optionsWindowController?.show()
         }

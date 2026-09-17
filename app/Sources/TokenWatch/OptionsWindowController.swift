@@ -3,8 +3,8 @@ import SwiftUI
 
 @MainActor
 final class OptionsWindowController: NSWindowController {
-    init(store: UsageStore) {
-        let settingsView = SettingsView(store: store)
+    init(store: UsageStore, apiServer: UsageAPIServer? = nil) {
+        let settingsView = SettingsView(store: store, apiServer: apiServer)
             .frame(width: 520)
         let hostingController = NSHostingController(rootView: settingsView)
 

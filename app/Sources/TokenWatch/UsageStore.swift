@@ -284,7 +284,7 @@ final class UsageStore: ObservableObject {
         [claude, codex, gemini, zai, muse, alicloud, commandCode]
     }
 
-    private func snapshot(for provider: ProviderKind) -> ProviderSnapshot {
+    func snapshot(for provider: ProviderKind) -> ProviderSnapshot {
         switch provider {
         case .claude:
             claude

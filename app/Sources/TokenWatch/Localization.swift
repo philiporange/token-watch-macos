@@ -145,6 +145,90 @@ struct Loc {
         }
     }
 
+    var usageAPI: String {
+        switch lang {
+        case .english: return "Local API"
+        case .spanish: return "API local"
+        case .french: return "API locale"
+        case .german: return "Lokale API"
+        case .japanese: return "ローカルAPI"
+        case .korean: return "로컬 API"
+        case .chineseSimplified: return "本地 API"
+        }
+    }
+
+    var usageAPIEnable: String {
+        switch lang {
+        case .english: return "Serve usage over HTTP"
+        case .spanish: return "Servir el uso por HTTP"
+        case .french: return "Servir l'utilisation via HTTP"
+        case .german: return "Nutzung über HTTP bereitstellen"
+        case .japanese: return "HTTPで使用状況を提供"
+        case .korean: return "HTTP로 사용량 제공"
+        case .chineseSimplified: return "通过 HTTP 提供用量"
+        }
+    }
+
+    var usageAPIPort: String {
+        switch lang {
+        case .english: return "Port"
+        case .spanish: return "Puerto"
+        case .french: return "Port"
+        case .german: return "Port"
+        case .japanese: return "ポート"
+        case .korean: return "포트"
+        case .chineseSimplified: return "端口"
+        }
+    }
+
+    var usageAPIDesc: String {
+        switch lang {
+        case .english: return "Serves the current usage as JSON on this Mac only (127.0.0.1): GET /usage for every provider, /usage/<provider> for one, and /health."
+        case .spanish: return "Sirve el uso actual como JSON solo en este Mac (127.0.0.1): GET /usage para todos los proveedores, /usage/<proveedor> para uno y /health."
+        case .french: return "Fournit l'utilisation actuelle en JSON sur ce Mac uniquement (127.0.0.1) : GET /usage pour tous les fournisseurs, /usage/<fournisseur> pour un seul, et /health."
+        case .german: return "Stellt die aktuelle Nutzung als JSON nur auf diesem Mac bereit (127.0.0.1): GET /usage für alle Anbieter, /usage/<anbieter> für einen und /health."
+        case .japanese: return "このMac上のみ（127.0.0.1）で現在の使用状況をJSONとして提供します。GET /usage で全プロバイダー、/usage/<provider> で個別、/health。"
+        case .korean: return "이 Mac에서만(127.0.0.1) 현재 사용량을 JSON으로 제공합니다. GET /usage는 모든 제공자, /usage/<provider>는 하나, /health."
+        case .chineseSimplified: return "仅在本机（127.0.0.1）以 JSON 提供当前用量：GET /usage 获取所有提供商，/usage/<provider> 获取单个，/health。"
+        }
+    }
+
+    var usageAPIListening: String {
+        switch lang {
+        case .english: return "Listening at"
+        case .spanish: return "Escuchando en"
+        case .french: return "À l'écoute sur"
+        case .german: return "Lauscht auf"
+        case .japanese: return "待ち受け中:"
+        case .korean: return "수신 대기 중:"
+        case .chineseSimplified: return "正在监听"
+        }
+    }
+
+    var usageAPIFailed: String {
+        switch lang {
+        case .english: return "Could not start:"
+        case .spanish: return "No se pudo iniciar:"
+        case .french: return "Impossible de démarrer :"
+        case .german: return "Start fehlgeschlagen:"
+        case .japanese: return "起動できません:"
+        case .korean: return "시작할 수 없음:"
+        case .chineseSimplified: return "无法启动："
+        }
+    }
+
+    var usageAPIStopped: String {
+        switch lang {
+        case .english: return "Stopped."
+        case .spanish: return "Detenido."
+        case .french: return "Arrêté."
+        case .german: return "Gestoppt."
+        case .japanese: return "停止中。"
+        case .korean: return "중지됨."
+        case .chineseSimplified: return "已停止。"
+        }
+    }
+
     var paceReveal: String {
         switch lang {
         case .english: return "Reveal by Pace"

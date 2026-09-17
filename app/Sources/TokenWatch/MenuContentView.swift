@@ -408,13 +408,18 @@ private struct UsageBar: View {
 
 struct SettingsView: View {
     @ObservedObject var store: UsageStore
+    private let apiServer: UsageAPIServer?
 
-    init(store: UsageStore) {
+    init(store: UsageStore, apiServer: UsageAPIServer? = nil) {
         self.store = store
+        self.apiServer = apiServer
     }
 
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.english.rawValue
     @AppStorage("showGeminiOtherModels") private var showGeminiOtherModels = false
+
+    @AppStorage(UsageAPISettings.enabledKey) private var usageAPIEnabled = false
+    @AppStorage(UsageAPISettings.portKey) private var usageAPIPort = UsageAPISettings.defaultPort
 
     @AppStorage(MenuBarVisibility.paceRevealEnabledKey) private var paceRevealEnabled = false
     @AppStorage(MenuBarVisibility.paceRevealAboveKey) private var paceRevealAbove = MenuBarVisibility.defaultPaceRevealAbove
@@ -436,6 +441,7 @@ struct SettingsView: View {
         Form {
             generalSection
             agentsSection
+            usageAPISection
             paceRevealSection
             resetRevealSection
             nearingResetRevealSection
@@ -602,6 +608,34 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: Local API
+
+    private var usageAPISection: some View {
+        Section {
+            Toggle(loc.usageAPIEnable, isOn: $usageAPIEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            if usageAPIEnabled {
+                HStack {
+                    Text(loc.usageAPIPort)
+                    Spacer()
+                    TextField("", value: $usageAPIPort, format: .number.grouping(.never))
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(width: 80)
+                }
+                if let apiServer {
+                    UsageAPIStatusView(server: apiServer, loc: loc)
+                }
+            }
+        } header: {
+            Text(loc.usageAPI)
+        } footer: {
+            Text(loc.usageAPIDesc)
+        }
+    }
+
     // MARK: Reveal rules
 
     private var paceRevealSection: some View {
@@ -641,6 +675,31 @@ struct SettingsView: View {
             }
         } footer: {
             Text(loc.nearingResetRevealDesc)
+        }
+    }
+}
+
+// MARK: - Local API status
+
+private struct UsageAPIStatusView: View {
+    @ObservedObject var server: UsageAPIServer
+    let loc: Loc
+
+    var body: some View {
+        switch server.state {
+        case .listening(let port):
+            Text("\(loc.usageAPIListening) http://127.0.0.1:\(String(port))/usage")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        case .failed(let message):
+            Text("\(loc.usageAPIFailed) \(message)")
+                .font(.caption)
+                .foregroundStyle(.orange)
+        case .stopped:
+            Text(loc.usageAPIStopped)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

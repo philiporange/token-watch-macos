@@ -40,6 +40,14 @@ Each provider appears once its local credentials are found:
 
 Approve the Keychain prompt if macOS asks — that's Token Watch reading your existing CLI credentials. Some quota endpoints are undocumented and may change without notice. Alibaba Cloud exposes no usage API for Token Plan keys, so Token Watch reads the console's internal gateway with your console session; the plan key alone is not enough.
 
+## Local API
+
+Options → Local API serves the app's current readings as JSON on `127.0.0.1` (default port 8037), off by default:
+
+- `GET /usage` returns every provider keyed by `claude`, `codex`, `gemini`, `zai`, `muse`, `alicloud`, and `commandcode`, plus `last_updated`.
+- `GET /usage/<provider>` returns one provider: `five_hour`, `weekly`, `model_windows`, `detail`, `pace_delta`, and `updated_at`.
+- `GET /health` returns `{"status": "ok"}`.
+
 ## License
 
 CC0 1.0 Universal (public domain) — see [LICENSE](LICENSE). Token Watch is a from-scratch, spec-based reimplementation; it began as a fork of [AIPace](https://github.com/lbybrilee/ai-pace) (MIT), whose code survives only in this repository's history under its original license.
