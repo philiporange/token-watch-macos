@@ -18,7 +18,15 @@ def snapshot(provider: str, percentage: float) -> ProviderSnapshot:
 
 
 def test_gets_use_cache_and_post_refreshes() -> None:
-    calls = {"claude": 0, "codex": 0, "gemini": 0, "zai": 0, "muse": 0, "alicloud": 0}
+    calls = {
+        "claude": 0,
+        "codex": 0,
+        "gemini": 0,
+        "zai": 0,
+        "muse": 0,
+        "alicloud": 0,
+        "commandcode": 0,
+    }
 
     async def fetch_claude() -> ProviderSnapshot:
         calls["claude"] += 1
@@ -56,6 +64,14 @@ def test_gets_use_cache_and_post_refreshes() -> None:
             weekly=UsageWindow(kind="Week", used_percentage=calls["alicloud"] * 6),
         )
 
+    async def fetch_commandcode() -> ProviderSnapshot:
+        calls["commandcode"] += 1
+        return ProviderSnapshot(
+            provider="Command Code",
+            five_hour=UsageWindow(kind="5h", used_percentage=calls["commandcode"] * 9),
+            weekly=UsageWindow(kind="Week", used_percentage=calls["commandcode"] * 11),
+        )
+
     app = create_app(
         UsageCache(
             fetch_claude,
@@ -64,6 +80,7 @@ def test_gets_use_cache_and_post_refreshes() -> None:
             fetch_zai,
             fetch_muse,
             fetch_alicloud,
+            fetch_commandcode,
         )
     )
     with TestClient(app) as client:
@@ -73,6 +90,7 @@ def test_gets_use_cache_and_post_refreshes() -> None:
         zai = client.get("/usage/zai")
         muse = client.get("/usage/muse")
         alicloud = client.get("/usage/alicloud")
+        commandcode = client.get("/usage/commandcode")
         refreshed = client.post("/refresh")
 
         assert first.status_code == 200
@@ -83,6 +101,7 @@ def test_gets_use_cache_and_post_refreshes() -> None:
         assert zai.json()["weekly"]["kind"] == "Month"
         assert muse.json()["provider"] == "Muse"
         assert alicloud.json()["provider"] == "AliCloud"
+        assert commandcode.json()["provider"] == "Command Code"
         assert calls == {
             "claude": 2,
             "codex": 2,
@@ -90,6 +109,7 @@ def test_gets_use_cache_and_post_refreshes() -> None:
             "zai": 2,
             "muse": 2,
             "alicloud": 2,
+            "commandcode": 2,
         }
         assert refreshed.json()["claude"]["five_hour"]["used_percentage"] == 20
 
@@ -125,6 +145,13 @@ def test_dashboard_and_health() -> None:
             weekly=UsageWindow(kind="Week", used_percentage=50),
         )
 
+    async def fetch_commandcode() -> ProviderSnapshot:
+        return ProviderSnapshot(
+            provider="Command Code",
+            five_hour=UsageWindow(kind="5h", used_percentage=55),
+            weekly=UsageWindow(kind="Week", used_percentage=65),
+        )
+
     app = create_app(
         UsageCache(
             fetch_claude,
@@ -133,6 +160,7 @@ def test_dashboard_and_health() -> None:
             fetch_zai,
             fetch_muse,
             fetch_alicloud,
+            fetch_commandcode,
         )
     )
     with TestClient(app) as client:
@@ -145,4 +173,5 @@ def test_dashboard_and_health() -> None:
         assert "provider-card--zai" in dashboard.text
         assert "provider-card--muse" in dashboard.text
         assert "provider-card--alicloud" in dashboard.text
+        assert "provider-card--commandcode" in dashboard.text
         assert health.json() == {"status": "ok"}

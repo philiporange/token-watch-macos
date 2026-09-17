@@ -1,6 +1,6 @@
 # Token Watch Usage API
 
-This FastAPI service reads the same local Claude Code, Codex CLI, Gemini through agy, z.ai, Muse, and AliCloud usage data
+This FastAPI service reads the same local Claude Code, Codex CLI, Gemini through agy, z.ai, Muse, AliCloud, and Command Code usage data
 as the macOS app. It binds to `0.0.0.0:8036` by default, making the dashboard
 available to other devices that can reach the host. Restrict access to trusted
 networks because the API exposes account usage information.
@@ -29,6 +29,7 @@ OpenAPI interface is available at `http://<server-address>:8036/docs`.
 - `GET /usage/zai` returns cached z.ai Coding Plan usage.
 - `GET /usage/muse` returns cached Muse Code quota usage.
 - `GET /usage/alicloud` returns cached AliCloud Model Studio Token Plan usage.
+- `GET /usage/commandcode` returns cached Command Code coding-agent subscription usage.
 - `POST /refresh` fetches all providers concurrently and replaces the cache.
 
 For z.ai, add `ZAI_API_KEY=your_key` to `~/.env`. The server never reads
@@ -55,6 +56,8 @@ For AliCloud, usage comes from the Model Studio console's undocumented internal
 gateway, authenticated with the `login_aliyunid_ticket` cookie. Sign in to the
 console in Muon, or set `ALICLOUD_CONSOLE_TICKET` in `~/.env`. The plan API key
 itself cannot query usage.
+
+For Command Code, sign in with `command-code`. The server reads `~/.commandcode/auth.json` or `COMMANDCODE_API_KEY`. The billing endpoints (`https://api.commandcode.ai/alpha/billing/credits` and `.../subscriptions`) are the CLI's own undocumented endpoints.
 
 The cache is populated when the server starts. Every cached provider object
 includes `cached_at`. A provider failure is returned in that provider's window
