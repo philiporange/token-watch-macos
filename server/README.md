@@ -1,6 +1,6 @@
 # Token Watch Usage API
 
-This FastAPI service reads the same local Claude Code, Codex CLI, Gemini through agy, and z.ai usage data
+This FastAPI service reads the same local Claude Code, Codex CLI, Gemini through agy, z.ai, and Muse usage data
 as the macOS app. It binds to `0.0.0.0:8036` by default, making the dashboard
 available to other devices that can reach the host. Restrict access to trusted
 networks because the API exposes account usage information.
@@ -27,6 +27,7 @@ OpenAPI interface is available at `http://<server-address>:8036/docs`.
 - `GET /usage/codex` returns cached Codex usage.
 - `GET /usage/gemini` returns cached Gemini quota usage from agy's credentials.
 - `GET /usage/zai` returns cached z.ai Coding Plan usage.
+- `GET /usage/muse` returns cached Muse Code quota usage.
 - `POST /refresh` fetches all providers concurrently and replaces the cache.
 
 For z.ai, add `ZAI_API_KEY=your_key` to `~/.env`. The server never reads
@@ -42,6 +43,12 @@ Gemini quota collection uses Google's private `loadCodeAssist` and
 `retrieveUserQuotaSummary` endpoints. They are undocumented and unstable; the
 supported alternative is `/usage` inside `agy`, and direct polling should be
 treated as account-sensitive.
+
+For Muse, sign in with `muse login`. The server reads `~/.config/muse/auth.json`
+(respecting `XDG_CONFIG_HOME`) or falls back to macOS Keychain service
+`ai.meta.dev.credentials`, account `meta` (Linux: Secret Service, same
+service/account names). The account endpoint (`https://api.meta.ai/muse-code/key`)
+is undocumented.
 
 The cache is populated when the server starts. Every cached provider object
 includes `cached_at`. A provider failure is returned in that provider's window

@@ -9,6 +9,7 @@
   --codex: #2f6fda;
   --gemini: #34a853;
   --zai: #7c3aed;
+  --muse: #1f306b;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
 }
@@ -193,6 +194,11 @@ h1 {
 .provider-card--zai {
   --accent: var(--zai);
   background: linear-gradient(145deg, rgba(124, 58, 237, 0.16), rgba(238, 231, 255, 0.9));
+}
+
+.provider-card--muse {
+  --accent: var(--muse);
+  background: linear-gradient(145deg, rgba(31, 48, 107, 0.14), rgba(230, 235, 247, 0.9));
 }
 
 .provider-header {

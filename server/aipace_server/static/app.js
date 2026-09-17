@@ -10,6 +10,7 @@ const providers = {
   codex: document.querySelector("#codex-card"),
   gemini: document.querySelector("#gemini-card"),
   zai: document.querySelector("#zai-card"),
+  muse: document.querySelector("#muse-card"),
 };
 
 function formatPercent(value) {
@@ -102,6 +103,7 @@ function render(data) {
   renderProvider("codex", data.codex);
   renderProvider("gemini", data.gemini);
   renderProvider("zai", data.zai);
+  renderProvider("muse", data.muse);
   const cachedAt = new Date(data.claude.cached_at);
   cacheStatus.textContent = `Cached ${new Intl.RelativeTimeFormat(undefined, {
     numeric: "auto",

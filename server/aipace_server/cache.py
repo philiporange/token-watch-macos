@@ -28,11 +28,13 @@ class UsageCache:
         fetch_codex: ProviderFetcher,
         fetch_gemini: ProviderFetcher,
         fetch_zai: ProviderFetcher,
+        fetch_muse: ProviderFetcher,
     ) -> None:
         self._fetch_claude = fetch_claude
         self._fetch_codex = fetch_codex
         self._fetch_gemini = fetch_gemini
         self._fetch_zai = fetch_zai
+        self._fetch_muse = fetch_muse
         self._response: UsageResponse | None = None
         self._refresh_lock = asyncio.Lock()
 
@@ -47,11 +49,12 @@ class UsageCache:
         """Fetch all providers and atomically replace the cached response."""
 
         async with self._refresh_lock:
-            claude, codex, gemini, zai = await asyncio.gather(
+            claude, codex, gemini, zai, muse = await asyncio.gather(
                 self._fetch_claude(),
                 self._fetch_codex(),
                 self._fetch_gemini(),
                 self._fetch_zai(),
+                self._fetch_muse(),
             )
             cached_at = datetime.now(timezone.utc)
             self._response = UsageResponse(
@@ -69,6 +72,10 @@ class UsageCache:
                 ),
                 zai=CachedProviderSnapshot(
                     **zai.model_dump(),
+                    cached_at=cached_at,
+                ),
+                muse=CachedProviderSnapshot(
+                    **muse.model_dump(),
                     cached_at=cached_at,
                 ),
             )

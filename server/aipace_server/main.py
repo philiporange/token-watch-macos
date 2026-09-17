@@ -1,4 +1,4 @@
-"""Serve cached Claude, Codex, Gemini, and z.ai usage snapshots and a dashboard.
+"""Serve cached Claude, Codex, Gemini, z.ai, and Muse usage snapshots and a dashboard.
 
 The cache is warmed at startup and refreshed explicitly through one POST route.
 GET routes only read cached values, while static assets render the same response
@@ -17,6 +17,7 @@ from aipace_server.cache import UsageCache
 from aipace_server.claude import fetch_claude_usage
 from aipace_server.codex import fetch_codex_usage
 from aipace_server.gemini import fetch_gemini_usage
+from aipace_server.muse import fetch_muse_usage
 from aipace_server.zai import fetch_zai_usage
 from aipace_server.config import settings
 from aipace_server.models import (
@@ -32,6 +33,7 @@ usage_cache = UsageCache(
     fetch_codex=lambda: fetch_codex_usage(settings.codex_timeout),
     fetch_gemini=lambda: fetch_gemini_usage(settings.request_timeout),
     fetch_zai=lambda: fetch_zai_usage(settings.request_timeout),
+    fetch_muse=lambda: fetch_muse_usage(settings.request_timeout),
 )
 
 
@@ -54,7 +56,7 @@ def create_app(cache: UsageCache = usage_cache) -> FastAPI:
 
     application = FastAPI(
         title="Token Watch Usage API",
-        description="Serve local Claude, Codex, Gemini, and z.ai usage data.",
+        description="Serve local Claude, Codex, Gemini, z.ai, and Muse usage data.",
         version="0.1.0",
         lifespan=lifespan,
     )
@@ -99,6 +101,12 @@ def create_app(cache: UsageCache = usage_cache) -> FastAPI:
         """Return the current cached z.ai quota windows."""
 
         return _cached_response(cache).zai
+
+    @application.get("/usage/muse", response_model=CachedProviderSnapshot)
+    async def muse_usage() -> CachedProviderSnapshot:
+        """Return the current cached Muse quota windows."""
+
+        return _cached_response(cache).muse
 
     @application.get("/usage", response_model=UsageResponse)
     async def usage() -> UsageResponse:
