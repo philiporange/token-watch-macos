@@ -314,7 +314,7 @@ struct AgyCredentialLoader: Sendable {
                 executable: "/usr/bin/security",
                 arguments: ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"],
                 input: nil,
-                timeout: 10,
+                timeout: nil,
                 currentDirectory: nil
             )
             return .success(Self.trimmed(raw))

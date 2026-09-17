@@ -188,7 +188,7 @@ struct MuseCredentialLoader: Sendable {
                     "-w",
                 ],
                 input: nil,
-                timeout: 10,
+                timeout: nil,
                 currentDirectory: nil
             )
             return .success(Self.trimmed(raw))
