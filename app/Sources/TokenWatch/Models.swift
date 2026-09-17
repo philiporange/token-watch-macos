@@ -8,6 +8,7 @@ enum ProviderKind: String, CaseIterable {
     case gemini = "Gemini"
     case zai = "Z.ai"
     case muse = "Muse"
+    case alicloud = "AliCloud"
 }
 
 // MARK: - Provider Display Name
@@ -20,6 +21,7 @@ enum ProviderDisplayName {
         case .gemini: return "Gm"
         case .zai: return "Z"
         case .muse: return "Mu"
+        case .alicloud: return "Ali"
         }
     }
 }

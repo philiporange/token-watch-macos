@@ -423,13 +423,13 @@ struct Loc {
 
     var providersDesc: String {
         switch lang {
-        case .english: return "Codex uses codex app-server. Claude, Gemini, and Muse read local CLI credentials; Gemini uses agy's quota service."
-        case .spanish: return "Codex usa codex app-server. Claude, Gemini y Muse leen credenciales locales de la CLI; Gemini usa el servicio de cuotas de agy."
-        case .french: return "Codex utilise codex app-server. Claude, Gemini et Muse lisent les identifiants CLI locaux ; Gemini utilise le service de quota d'agy."
-        case .german: return "Codex verwendet codex app-server. Claude, Gemini und Muse lesen lokale CLI-Zugangsdaten; Gemini nutzt den Quota-Dienst von agy."
-        case .japanese: return "Codexはcodex app-serverを使用します。Claude、Gemini、MuseはローカルのCLI資格情報を読み込みます。Geminiはagyのクォータサービスを使用します。"
-        case .korean: return "Codex는 codex app-server를 사용합니다. Claude, Gemini 및 Muse는 로컬 CLI 자격 증명을 읽고, Gemini는 agy의 할당량 서비스를 사용합니다."
-        case .chineseSimplified: return "Codex 使用 codex app-server。Claude、Gemini 和 Muse 读取本地 CLI 凭据；Gemini 使用 agy 的配额服务。"
+        case .english: return "Codex uses codex app-server. Claude, Gemini, and Muse read local CLI credentials; Gemini uses agy's quota service. AliCloud reads the Model Studio console session from Muon."
+        case .spanish: return "Codex usa codex app-server. Claude, Gemini y Muse leen credenciales locales de la CLI; Gemini usa el servicio de cuotas de agy. AliCloud lee la sesión de la consola Model Studio desde Muon."
+        case .french: return "Codex utilise codex app-server. Claude, Gemini et Muse lisent les identifiants CLI locaux ; Gemini utilise le service de quota d'agy. AliCloud lit la session de la console Model Studio depuis Muon."
+        case .german: return "Codex verwendet codex app-server. Claude, Gemini und Muse lesen lokale CLI-Zugangsdaten; Gemini nutzt den Quota-Dienst von agy. AliCloud liest die Model-Studio-Konsolensitzung aus Muon."
+        case .japanese: return "Codexはcodex app-serverを使用します。Claude、Gemini、MuseはローカルのCLI資格情報を読み込みます。Geminiはagyのクォータサービスを使用します。AliCloudはMuonのModel Studioコンソールセッションを読み込みます。"
+        case .korean: return "Codex는 codex app-server를 사용합니다. Claude, Gemini 및 Muse는 로컬 CLI 자격 증명을 읽고, Gemini는 agy의 할당량 서비스를 사용합니다. AliCloud는 Muon의 Model Studio 콘솔 세션을 읽습니다."
+        case .chineseSimplified: return "Codex 使用 codex app-server。Claude、Gemini 和 Muse 读取本地 CLI 凭据；Gemini 使用 agy 的配额服务。AliCloud 从 Muon 读取 Model Studio 控制台会话。"
         }
     }
 
@@ -813,6 +813,26 @@ struct Loc {
             case .japanese: return "ターミナルで `muse login` を実行して再度サインインしてください。"
             case .korean: return "터미널에서 `muse login`을 실행하여 다시 로그인하세요."
             case .chineseSimplified: return "在终端中运行 `muse login` 并重新登录。"
+            }
+        case (.alicloud, .missingAuth), (.alicloud, .notLoggedIn):
+            switch lang {
+            case .english: return "Sign in to the Model Studio console in Muon, or set `ALICLOUD_CONSOLE_TICKET` in `~/.env`, then refresh."
+            case .spanish: return "Inicia sesión en la consola Model Studio en Muon, o configura `ALICLOUD_CONSOLE_TICKET` en `~/.env`, luego actualiza."
+            case .french: return "Connectez-vous à la console Model Studio dans Muon, ou définissez `ALICLOUD_CONSOLE_TICKET` dans `~/.env`, puis actualisez."
+            case .german: return "Melde dich in Muon bei der Model-Studio-Konsole an oder setze `ALICLOUD_CONSOLE_TICKET` in `~/.env`, danach aktualisieren."
+            case .japanese: return "MuonでModel Studioコンソールにサインインするか、`~/.env` に `ALICLOUD_CONSOLE_TICKET` を設定し、更新してください。"
+            case .korean: return "Muon에서 Model Studio 콘솔에 로그인하거나 `~/.env`에 `ALICLOUD_CONSOLE_TICKET`을 설정한 후 새로고침하세요."
+            case .chineseSimplified: return "在 Muon 中登录 Model Studio 控制台，或在 `~/.env` 中设置 `ALICLOUD_CONSOLE_TICKET`，然后刷新。"
+            }
+        case (.alicloud, .sessionExpired):
+            switch lang {
+            case .english: return "Sign in to the Model Studio console again, then refresh."
+            case .spanish: return "Vuelve a iniciar sesión en la consola Model Studio, luego actualiza."
+            case .french: return "Reconnectez-vous à la console Model Studio, puis actualisez."
+            case .german: return "Melde dich erneut bei der Model-Studio-Konsole an, danach aktualisieren."
+            case .japanese: return "Model Studioコンソールに再度サインインし、更新してください。"
+            case .korean: return "Model Studio 콘솔에 다시 로그인한 후 새로고침하세요."
+            case .chineseSimplified: return "重新登录 Model Studio 控制台，然后刷新。"
             }
         default:
             return nil

@@ -8,15 +8,17 @@ struct StatusItemLabelView: View {
     let geminiUsage: StatusItemProviderUsage?
     let zaiUsage: StatusItemProviderUsage?
     let museUsage: StatusItemProviderUsage?
+    let alicloudUsage: StatusItemProviderUsage?
 
     nonisolated static func resolvedFallbackText(
         claudeText: String?,
         codexText: String?,
         geminiText: String? = nil,
         zaiText: String? = nil,
-        museText: String? = nil
+        museText: String? = nil,
+        alicloudText: String? = nil
     ) -> String? {
-        let allNilOrBlank = [claudeText, codexText, geminiText, zaiText, museText].allSatisfy { text in
+        let allNilOrBlank = [claudeText, codexText, geminiText, zaiText, museText, alicloudText].allSatisfy { text in
             guard let text = text else { return true }
             return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -41,8 +43,11 @@ struct StatusItemLabelView: View {
             if let muse = museUsage {
                 usagePill(for: muse, color: AppTheme.museAccent)
             }
+            if let alicloud = alicloudUsage {
+                usagePill(for: alicloud, color: AppTheme.alicloudAccent)
+            }
 
-            if claudeUsage == nil && codexUsage == nil && geminiUsage == nil && zaiUsage == nil && museUsage == nil {
+            if claudeUsage == nil && codexUsage == nil && geminiUsage == nil && zaiUsage == nil && museUsage == nil && alicloudUsage == nil {
                 fallbackPill
             }
         }
