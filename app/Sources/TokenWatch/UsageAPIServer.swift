@@ -209,6 +209,18 @@ struct UsageAPIRouter {
     }
 }
 
+/// KVO-visible mirrors of the API defaults, so changes made in the Options
+/// window and from `defaults write` both restart the listener.
+extension UserDefaults {
+    @objc dynamic var usageAPIEnabled: Bool {
+        bool(forKey: UsageAPISettings.enabledKey)
+    }
+
+    @objc dynamic var usageAPIPort: Int {
+        integer(forKey: UsageAPISettings.portKey)
+    }
+}
+
 // MARK: - Server
 
 @MainActor
@@ -225,7 +237,7 @@ final class UsageAPIServer: ObservableObject {
     private let userDefaults: UserDefaults
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
-    private var observer: NSObjectProtocol?
+    private var observers: [NSKeyValueObservation] = []
     private var appliedSettings: (enabled: Bool, port: Int)?
 
     init(store: UsageStore, userDefaults: UserDefaults = .standard, followSettings: Bool = true) {
@@ -244,23 +256,22 @@ final class UsageAPIServer: ObservableObject {
 
         if followSettings {
             applySettings()
-            observer = NotificationCenter.default.addObserver(
-                forName: UserDefaults.didChangeNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.applySettings() }
-            }
+            observers = [
+                userDefaults.observe(\.usageAPIEnabled) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.applySettings() }
+                },
+                userDefaults.observe(\.usageAPIPort) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.applySettings() }
+                },
+            ]
         }
     }
 
     /// Release the defaults observer and socket; called by the owner before
     /// discarding the server, since a MainActor deinit cannot touch them.
     func shutdown() {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
-            self.observer = nil
-        }
+        observers.forEach { $0.invalidate() }
+        observers = []
         stop()
     }
 

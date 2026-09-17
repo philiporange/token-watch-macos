@@ -65,6 +65,17 @@ import Testing
         #expect(StatusItemFormatter.text(prefix: "Z", snapshot: snap).contains("1m"))
     }
 
+    @Test func formatterShortensFableLabel() {
+        #expect(StatusItemFormatter.truncatedModelName(from: "Fable 5.1") == "f")
+        #expect(StatusItemFormatter.truncatedModelName(from: "Claude Fable") == "f")
+        #expect(StatusItemFormatter.truncatedModelName(from: "Opus 4.5 Max") == "Opus 4.")
+        #expect(StatusItemFormatter.truncatedModelName(from: "Credits") == "c")
+        let snap = makeSnapshot(.claude, fiveHourUsed: 10, weeklyUsed: 20, modelWindows: [
+            ModelUsageWindow(modelName: "Fable", window: makeWindow(.modelWeekly, used: 33), isActive: true),
+        ])
+        #expect(StatusItemFormatter.content(name: "Cl", snapshot: snap).metrics.first?.label == "f")
+    }
+
     @Test func formatterLongWindowOnlyShowsBarePercentage() {
         let snap = makeSnapshot(.codex, fiveHourUsed: 10, weeklyUsed: 42.4)
         let content = StatusItemFormatter.content(name: "Cx", snapshot: snap, longWindowOnly: true)

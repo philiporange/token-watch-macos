@@ -90,8 +90,17 @@ enum StatusItemFormatter {
 
     // MARK: - Private Helpers
 
-    private static func truncatedModelName(from name: String) -> String {
+    /// Fable and the Command Code credits row get one-letter labels so their
+    /// pills stay narrow.
+    static func truncatedModelName(from name: String) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
+        let lowercased = trimmed.lowercased()
+        if lowercased.contains("fable") {
+            return "f"
+        }
+        if lowercased == "credits" {
+            return "c"
+        }
         return trimmed.isEmpty ? "Model" : String(trimmed.prefix(7))
     }
 
