@@ -30,7 +30,7 @@ class ModelUsageWindow(BaseModel):
 class ProviderSnapshot(BaseModel):
     """The current normalized usage state for one provider."""
 
-    provider: Literal["Claude", "Codex", "Gemini", "Z.ai", "Muse"]
+    provider: Literal["Claude", "Codex", "Gemini", "Z.ai", "Muse", "AliCloud"]
     five_hour: UsageWindow
     weekly: UsageWindow
     model_windows: list[ModelUsageWindow] = Field(default_factory=list)
@@ -51,6 +51,7 @@ class UsageResponse(BaseModel):
     gemini: CachedProviderSnapshot
     zai: CachedProviderSnapshot
     muse: CachedProviderSnapshot
+    alicloud: CachedProviderSnapshot
 
 
 class HealthResponse(BaseModel):

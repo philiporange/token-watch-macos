@@ -11,6 +11,7 @@ const providers = {
   gemini: document.querySelector("#gemini-card"),
   zai: document.querySelector("#zai-card"),
   muse: document.querySelector("#muse-card"),
+  alicloud: document.querySelector("#alicloud-card"),
 };
 
 function formatPercent(value) {
@@ -104,6 +105,7 @@ function render(data) {
   renderProvider("gemini", data.gemini);
   renderProvider("zai", data.zai);
   renderProvider("muse", data.muse);
+  renderProvider("alicloud", data.alicloud);
   const cachedAt = new Date(data.claude.cached_at);
   cacheStatus.textContent = `Cached ${new Intl.RelativeTimeFormat(undefined, {
     numeric: "auto",
