@@ -183,7 +183,11 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
         guard store.agentStatus(for: provider).availability.showsInPopover else { return nil }
         guard MenuBarVisibility.showsInMenuBar(snapshot) else { return nil }
         let name = ProviderDisplayName.displayName(for: provider)
-        return StatusItemFormatter.content(name: name, snapshot: snapshot)
+        return StatusItemFormatter.content(
+            name: name,
+            snapshot: snapshot,
+            longWindowOnly: MenuBarVisibility.showsLongWindowOnly(provider, userDefaults: userDefaults)
+        )
     }
 
     /// Gemini's snapshot with its model windows emptied unless the

@@ -426,6 +426,7 @@ struct SettingsView: View {
 
     /// Local mirror of each provider's menu-bar tick, since @AppStorage cannot use computed keys.
     @State private var menuBarTicks: [ProviderKind: Bool] = [:]
+    @State private var longWindowOnlyTicks: [ProviderKind: Bool] = [:]
 
     private var loc: Loc {
         Loc(lang: AppLanguage(rawValue: appLanguageRaw) ?? .english)
@@ -442,10 +443,13 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             var ticks: [ProviderKind: Bool] = [:]
+            var longWindowTicks: [ProviderKind: Bool] = [:]
             for provider in ProviderKind.allCases {
                 ticks[provider] = MenuBarVisibility.isTicked(provider)
+                longWindowTicks[provider] = MenuBarVisibility.showsLongWindowOnly(provider)
             }
             menuBarTicks = ticks
+            longWindowOnlyTicks = longWindowTicks
         }
     }
 
@@ -552,6 +556,18 @@ struct SettingsView: View {
             Text(loc.statusTitle(status))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(statusColor(status.availability))
+
+            Toggle(loc.longWindowOnly, isOn: Binding(
+                get: { longWindowOnlyTicks[provider] ?? false },
+                set: { newValue in
+                    longWindowOnlyTicks[provider] = newValue
+                    UserDefaults.standard.set(newValue, forKey: MenuBarVisibility.longWindowOnlyKey(for: provider))
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .font(.caption)
+            .help(loc.longWindowOnlyDesc)
 
             Toggle("", isOn: Binding(
                 get: { menuBarTicks[provider] ?? true },

@@ -24,7 +24,19 @@ enum StatusItemFormatter {
         return String(format: "%.0f", percentage.rounded())
     }
 
-    static func content(name: String, snapshot: ProviderSnapshot) -> StatusItemProviderUsage {
+    static func content(
+        name: String,
+        snapshot: ProviderSnapshot,
+        longWindowOnly: Bool = false
+    ) -> StatusItemProviderUsage {
+        if longWindowOnly {
+            let value = percentSuffixed(compactValue(for: longWindowOnlyWindow(for: snapshot)))
+            return StatusItemProviderUsage(
+                name: name,
+                metrics: [StatusItemMetric(label: "", value: value, isModelScoped: false)]
+            )
+        }
+
         var metrics: [StatusItemMetric] = []
 
         // 1. Model-scoped metrics (one per model window)
@@ -63,10 +75,17 @@ enum StatusItemFormatter {
         var parts = [usage.name]
 
         for metric in usage.metrics {
-            parts.append("\(metric.label) \(metric.value)")
+            parts.append(metric.label.isEmpty ? metric.value : "\(metric.label) \(metric.value)")
         }
 
         return parts.joined(separator: " · ")
+    }
+
+    /// The single window shown in 7d-only mode: a Fable-scoped weekly limit
+    /// when the provider reports one (Claude), otherwise the long window.
+    static func longWindowOnlyWindow(for snapshot: ProviderSnapshot) -> UsageWindow {
+        let fable = snapshot.modelWindows.first { $0.modelName.lowercased().contains("fable") }
+        return fable?.window ?? snapshot.weekly
     }
 
     // MARK: - Private Helpers

@@ -65,6 +65,29 @@ import Testing
         #expect(StatusItemFormatter.text(prefix: "Z", snapshot: snap).contains("1m"))
     }
 
+    @Test func formatterLongWindowOnlyShowsBarePercentage() {
+        let snap = makeSnapshot(.codex, fiveHourUsed: 10, weeklyUsed: 42.4)
+        let content = StatusItemFormatter.content(name: "Cx", snapshot: snap, longWindowOnly: true)
+        #expect(content.metrics.count == 1)
+        #expect(content.metrics[0].label == "")
+        #expect(content.metrics[0].value == "42%")
+        #expect(StatusItemFormatter.content(name: "Cx", snapshot: snap).metrics.count > 1)
+
+        let claude = makeSnapshot(.claude, fiveHourUsed: 10, weeklyUsed: 42.4, modelWindows: [
+            ModelUsageWindow(modelName: "Opus", window: makeWindow(.modelWeekly, used: 5), isActive: false),
+            ModelUsageWindow(modelName: "Fable 5.1", window: makeWindow(.modelWeekly, used: 63), isActive: true),
+        ])
+        let claudeContent = StatusItemFormatter.content(name: "Cl", snapshot: claude, longWindowOnly: true)
+        #expect(claudeContent.metrics == [StatusItemMetric(label: "", value: "63%", isModelScoped: false)])
+
+        let defaults = UserDefaults(suiteName: "LongWindowOnlyTests")!
+        defaults.removePersistentDomain(forName: "LongWindowOnlyTests")
+        #expect(MenuBarVisibility.showsLongWindowOnly(.muse, userDefaults: defaults) == false)
+        defaults.set(true, forKey: MenuBarVisibility.longWindowOnlyKey(for: .muse))
+        #expect(MenuBarVisibility.showsLongWindowOnly(.muse, userDefaults: defaults) == true)
+        #expect(MenuBarVisibility.longWindowOnlyKey(for: .zai) == "menuBarLongWindowOnlyZai")
+    }
+
     @Test func formatterDropsErroredLongWindow() {
         let snap = makeSnapshot(.claude, fiveHourUsed: 10, weeklyMessage: "No weekly limit returned.")
         let text = StatusItemFormatter.text(prefix: "Cl", snapshot: snap)

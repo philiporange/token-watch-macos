@@ -64,9 +64,11 @@ struct StatusItemLabelView: View {
 
     private func standardMetric(_ metric: StatusItemMetric) -> some View {
         HStack(spacing: 1) {
-            Text(metric.label)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.white.opacity(0.7))
+            if !metric.label.isEmpty {
+                Text(metric.label)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white.opacity(0.7))
+            }
             Text(metric.value)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white)

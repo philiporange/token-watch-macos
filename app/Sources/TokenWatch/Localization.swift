@@ -111,13 +111,37 @@ struct Loc {
 
     var menuBarAgentsDesc: String {
         switch lang {
-        case .english: return "Ticked agents appear in the menu bar."
-        case .spanish: return "Los agentes marcados aparecen en la barra de menú."
-        case .french: return "Les agents cochés apparaissent dans la barre des menus."
-        case .german: return "Aktivierte Agenten werden in der Menüleiste angezeigt."
-        case .japanese: return "チェックを入れたエージェントがメニューバーに表示されます。"
-        case .korean: return "선택된 에이전트가 메뉴 바에 표시됩니다."
-        case .chineseSimplified: return "勾选的 Agent 将显示在菜单栏中。"
+        case .english: return "Ticked agents appear in the menu bar. \"7d only\" shrinks an agent's pill to its long-window percentage."
+        case .spanish: return "Los agentes marcados aparecen en la barra de menú. \"Solo 7d\" reduce la burbuja al porcentaje de la ventana larga."
+        case .french: return "Les agents cochés apparaissent dans la barre des menus. « 7j seulement » réduit la pastille au pourcentage de la fenêtre longue."
+        case .german: return "Aktivierte Agenten werden in der Menüleiste angezeigt. „Nur 7 T.“ reduziert die Kapsel auf den Prozentwert des langen Fensters."
+        case .japanese: return "チェックを入れたエージェントがメニューバーに表示されます。「7日のみ」は長期ウィンドウの割合だけを表示します。"
+        case .korean: return "선택된 에이전트가 메뉴 바에 표시됩니다. \"7일만\"은 장기 기간의 백분율만 표시합니다."
+        case .chineseSimplified: return "勾选的 Agent 将显示在菜单栏中。“仅 7 天”仅显示长周期的百分比。"
+        }
+    }
+
+    var longWindowOnly: String {
+        switch lang {
+        case .english: return "7d only"
+        case .spanish: return "Solo 7d"
+        case .french: return "7j seulement"
+        case .german: return "Nur 7 T."
+        case .japanese: return "7日のみ"
+        case .korean: return "7일만"
+        case .chineseSimplified: return "仅 7 天"
+        }
+    }
+
+    var longWindowOnlyDesc: String {
+        switch lang {
+        case .english: return "Show only the weekly (or monthly) percentage in the menu bar."
+        case .spanish: return "Muestra solo el porcentaje semanal (o mensual) en la barra de menú."
+        case .french: return "N'afficher que le pourcentage hebdomadaire (ou mensuel) dans la barre des menus."
+        case .german: return "Nur den wöchentlichen (oder monatlichen) Prozentwert in der Menüleiste anzeigen."
+        case .japanese: return "メニューバーに週間（または月間）の割合のみを表示します。"
+        case .korean: return "메뉴 바에 주간(또는 월간) 백분율만 표시합니다."
+        case .chineseSimplified: return "菜单栏中仅显示每周（或每月）百分比。"
         }
     }
 

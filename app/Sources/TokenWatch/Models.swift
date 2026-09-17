@@ -207,6 +207,17 @@ enum MenuBarVisibility {
         return userDefaults.object(forKey: key) as? Bool ?? true
     }
 
+    /// Key for the per-provider option that reduces the menu bar pill to the
+    /// long window's percentage alone.
+    static func longWindowOnlyKey(for provider: ProviderKind) -> String {
+        let lettersAndDigits = provider.rawValue.filter { $0.isLetter || $0.isNumber }
+        return "menuBarLongWindowOnly" + lettersAndDigits
+    }
+
+    static func showsLongWindowOnly(_ provider: ProviderKind, userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: longWindowOnlyKey(for: provider))
+    }
+
     static func showsInMenuBar(_ snapshot: ProviderSnapshot, userDefaults: UserDefaults = .standard, now: Date = .now) -> Bool {
         if isTicked(snapshot.provider, userDefaults: userDefaults) {
             return true
