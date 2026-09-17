@@ -7,14 +7,16 @@ struct StatusItemLabelView: View {
     let codexUsage: StatusItemProviderUsage?
     let geminiUsage: StatusItemProviderUsage?
     let zaiUsage: StatusItemProviderUsage?
+    let museUsage: StatusItemProviderUsage?
 
     nonisolated static func resolvedFallbackText(
         claudeText: String?,
         codexText: String?,
         geminiText: String? = nil,
-        zaiText: String? = nil
+        zaiText: String? = nil,
+        museText: String? = nil
     ) -> String? {
-        let allNilOrBlank = [claudeText, codexText, geminiText, zaiText].allSatisfy { text in
+        let allNilOrBlank = [claudeText, codexText, geminiText, zaiText, museText].allSatisfy { text in
             guard let text = text else { return true }
             return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -36,8 +38,11 @@ struct StatusItemLabelView: View {
             if let zai = zaiUsage {
                 usagePill(for: zai, color: AppTheme.zaiAccent)
             }
+            if let muse = museUsage {
+                usagePill(for: muse, color: AppTheme.museAccent)
+            }
 
-            if claudeUsage == nil && codexUsage == nil && geminiUsage == nil && zaiUsage == nil {
+            if claudeUsage == nil && codexUsage == nil && geminiUsage == nil && zaiUsage == nil && museUsage == nil {
                 fallbackPill
             }
         }

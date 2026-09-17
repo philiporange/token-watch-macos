@@ -148,7 +148,8 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             claudeUsage: providerUsage(for: .claude, snapshot: store.claude),
             codexUsage: providerUsage(for: .codex, snapshot: store.codex),
             geminiUsage: providerUsage(for: .gemini, snapshot: filteredGeminiSnapshot),
-            zaiUsage: providerUsage(for: .zai, snapshot: store.zai)
+            zaiUsage: providerUsage(for: .zai, snapshot: store.zai),
+            museUsage: providerUsage(for: .muse, snapshot: store.muse)
         )
 
         let renderer = ImageRenderer(content: view)
@@ -200,6 +201,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
     private func subscribeToUpdates() {
         store.$claude
             .combineLatest(store.$codex, store.$gemini, store.$zai)
+            .combineLatest(store.$muse)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshLabelAndLayout() }

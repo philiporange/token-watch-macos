@@ -13,6 +13,9 @@ enum AppTheme {
     /// A purple accent for Z.ai
     static let zaiAccent: Color = Color(red: 0.56, green: 0.24, blue: 0.86)
 
+    /// A navy blue accent for Muse
+    static let museAccent: Color = Color(red: 0.12, green: 0.19, blue: 0.42)
+
     /// Returns the accent color for the given provider.
     /// - Parameter provider: The provider kind to get the accent for
     /// - Returns: The accent color associated with the provider
@@ -26,6 +29,8 @@ enum AppTheme {
             return geminiAccent
         case .zai:
             return zaiAccent
+        case .muse:
+            return museAccent
         }
     }
 }

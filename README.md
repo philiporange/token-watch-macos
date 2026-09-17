@@ -6,9 +6,9 @@
 
 **A macOS menu bar app that shows your AI usage.**
 
-Token Watch shows current Claude, Codex, Gemini, and z.ai usage in your Mac's menu bar, including model-scoped limits and pacing insights. It uses your existing local credentials — nothing extra to sign in to, no telemetry, no backend; requests go straight from your Mac to each provider.
+Token Watch shows current Claude, Codex, Gemini, z.ai, and Muse usage in your Mac's menu bar, including model-scoped limits and pacing insights. It uses your existing local credentials — nothing extra to sign in to, no telemetry, no backend; requests go straight from your Mac to each provider.
 
-> Unofficial; not affiliated with Anthropic, OpenAI, Google, or Z.ai. Forked from [AIPace](https://github.com/lbybrilee/ai-pace).
+> Unofficial; not affiliated with Anthropic, OpenAI, Google, Z.ai, or Meta. Forked from [AIPace](https://github.com/lbybrilee/ai-pace).
 
 ## Install
 
@@ -34,6 +34,7 @@ Each provider appears once its local credentials are found:
 | Codex | `codex` login, via `codex app-server` |
 | Gemini | `agy` login: Keychain, or `~/.gemini/antigravity-cli/antigravity-oauth-token` |
 | z.ai | `ZAI_API_KEY` in the environment or `~/.env` |
+| Muse | `muse login`: Keychain (`ai.meta.dev.credentials`), or `~/.config/muse/auth.json` |
 
 Approve the Keychain prompt if macOS asks — that's Token Watch reading your existing CLI credentials. Some quota endpoints are undocumented and may change without notice.
 

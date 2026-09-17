@@ -9,6 +9,7 @@ extension ClaudeProbe: ProviderSnapshotFetching {}
 extension CodexProbe: ProviderSnapshotFetching {}
 extension GeminiProbe: ProviderSnapshotFetching {}
 extension ZaiProbe: ProviderSnapshotFetching {}
+extension MuseProbe: ProviderSnapshotFetching {}
 
 private struct MissingGeminiSnapshotFetcher: ProviderSnapshotFetching {
     func fetch() async -> ProviderSnapshot {
@@ -32,6 +33,17 @@ private struct MissingZaiSnapshotFetcher: ProviderSnapshotFetching {
     }
 }
 
+private struct MissingMuseSnapshotFetcher: ProviderSnapshotFetching {
+    func fetch() async -> ProviderSnapshot {
+        let message = "Muse credentials not found. Run muse login."
+        return ProviderSnapshot(
+            provider: .muse,
+            fiveHour: .placeholder(.fiveHour, message: message),
+            weekly: .placeholder(.weekly, message: message)
+        )
+    }
+}
+
 @MainActor
 final class UsageStore: ObservableObject {
     private static let autoRefreshIntervalKey = "autoRefreshInterval"
@@ -40,6 +52,7 @@ final class UsageStore: ObservableObject {
     @Published var codex: ProviderSnapshot = .loading(.codex)
     @Published var gemini: ProviderSnapshot = .loading(.gemini)
     @Published var zai: ProviderSnapshot = .loading(.zai)
+    @Published var muse: ProviderSnapshot = .loading(.muse)
 
     @Published var lastUpdated: Date?
     @Published var lastUpdatedByProvider: [ProviderKind: Date] = [:]
@@ -53,6 +66,7 @@ final class UsageStore: ObservableObject {
     private let codexProbe: any ProviderSnapshotFetching
     private let geminiProbe: any ProviderSnapshotFetching
     private let zaiProbe: any ProviderSnapshotFetching
+    private let museProbe: any ProviderSnapshotFetching
     private let launchAtStartupManager: any LaunchAtStartupManaging
     private let userDefaults: UserDefaults
 
@@ -64,6 +78,7 @@ final class UsageStore: ObservableObject {
         codexProbe: any ProviderSnapshotFetching,
         geminiProbe: any ProviderSnapshotFetching = MissingGeminiSnapshotFetcher(),
         zaiProbe: any ProviderSnapshotFetching = MissingZaiSnapshotFetcher(),
+        museProbe: any ProviderSnapshotFetching = MissingMuseSnapshotFetcher(),
         launchAtStartupManager: any LaunchAtStartupManaging = LaunchAtStartupManager(),
         userDefaults: UserDefaults = .standard,
         startRefreshLoop: Bool = true
@@ -72,6 +87,7 @@ final class UsageStore: ObservableObject {
         self.codexProbe = codexProbe
         self.geminiProbe = geminiProbe
         self.zaiProbe = zaiProbe
+        self.museProbe = museProbe
         self.launchAtStartupManager = launchAtStartupManager
         self.userDefaults = userDefaults
 
@@ -91,7 +107,8 @@ final class UsageStore: ObservableObject {
             claudeProbe: ClaudeProbe(),
             codexProbe: CodexProbe(),
             geminiProbe: GeminiProbe(),
-            zaiProbe: ZaiProbe()
+            zaiProbe: ZaiProbe(),
+            museProbe: MuseProbe()
         )
     }
 
@@ -195,7 +212,7 @@ final class UsageStore: ObservableObject {
         let availability: AgentAvailability
 
         switch provider {
-        case .claude, .gemini:
+        case .claude, .gemini, .muse:
             if lowercasedMessage.contains("credentials not found") ||
                 lowercasedMessage.contains("credentials could not be read") {
                 availability = .missingAuth
@@ -230,7 +247,7 @@ final class UsageStore: ObservableObject {
     }
 
     private var providerSnapshots: [ProviderSnapshot] {
-        [claude, codex, gemini, zai]
+        [claude, codex, gemini, zai, muse]
     }
 
     private func snapshot(for provider: ProviderKind) -> ProviderSnapshot {
@@ -243,6 +260,8 @@ final class UsageStore: ObservableObject {
             gemini
         case .zai:
             zai
+        case .muse:
+            muse
         }
     }
 
@@ -256,6 +275,8 @@ final class UsageStore: ObservableObject {
             gemini = snapshot
         case .zai:
             zai = snapshot
+        case .muse:
+            muse = snapshot
         }
     }
 
@@ -269,6 +290,8 @@ final class UsageStore: ObservableObject {
             geminiProbe
         case .zai:
             zaiProbe
+        case .muse:
+            museProbe
         }
     }
 
