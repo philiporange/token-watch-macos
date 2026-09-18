@@ -30,6 +30,12 @@ enum StatusItemFormatter {
         longWindowOnly: Bool = false
     ) -> StatusItemProviderUsage {
         if longWindowOnly {
+            if !snapshot.showsLongWindow {
+                return StatusItemProviderUsage(
+                    name: name,
+                    metrics: [StatusItemMetric(label: "", value: "∞", isModelScoped: false)]
+                )
+            }
             let value = percentSuffixed(compactValue(for: longWindowOnlyWindow(for: snapshot)))
             return StatusItemProviderUsage(
                 name: name,
@@ -55,11 +61,15 @@ enum StatusItemFormatter {
         }
 
         // 3. Long window with label from its kind (included only when it has a percentage OR is still loading)
-        if shouldIncludeWindow(snapshot.weekly) {
-            let rawValue = compactValue(for: snapshot.weekly)
-            let value = percentSuffixed(rawValue)
-            let label = longWindowLabel(for: snapshot.weekly.kind)
-            metrics.append(StatusItemMetric(label: label, value: value, isModelScoped: false))
+        if snapshot.showsLongWindow {
+            if shouldIncludeWindow(snapshot.weekly) {
+                let rawValue = compactValue(for: snapshot.weekly)
+                let value = percentSuffixed(rawValue)
+                let label = longWindowLabel(for: snapshot.weekly.kind)
+                metrics.append(StatusItemMetric(label: label, value: value, isModelScoped: false))
+            }
+        } else {
+            metrics.append(StatusItemMetric(label: "7d", value: "∞", isModelScoped: false))
         }
 
         // 4. Optional pacing metric

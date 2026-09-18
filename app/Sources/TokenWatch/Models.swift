@@ -94,7 +94,14 @@ struct ProviderSnapshot {
     var modelWindows: [ModelUsageWindow] = []
     var detail: String?
 
+    var showsLongWindow: Bool {
+        !(provider == .zai && weekly.kind == .monthly)
+    }
+
     var pacingWindow: UsageWindow {
+        guard showsLongWindow else {
+            return fiveHour
+        }
         let candidates = [weekly] + modelWindows.filter { $0.window.kind.supportsPacing }.map { $0.window }
         let sorted = candidates.sorted { a, b in
             let aPct = a.usedPercentage ?? -1

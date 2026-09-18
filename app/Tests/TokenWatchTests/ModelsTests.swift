@@ -148,4 +148,75 @@ import Testing
         #expect(AutoRefreshInterval.tenMinutes.label == "10 minutes")
         #expect(AutoRefreshInterval.thirtyMinutes.duration == 1800)
     }
+
+    // MARK: - z.ai MCP hiding & synthetic weekly
+
+    @Test func zaiShowsLongWindowAndPacingFallback() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let fiveHourReset = now.addingTimeInterval(2 * 3600)
+        let monthlyReset = now.addingTimeInterval(15 * 86_400)
+        let snap = ProviderSnapshot(
+            provider: .zai,
+            fiveHour: makeWindow(.fiveHour, used: 25, resetsAt: fiveHourReset),
+            weekly: makeWindow(.monthly, used: 80, resetsAt: monthlyReset),
+            modelWindows: [],
+            detail: nil
+        )
+
+        // !showsLongWindow
+        #expect(snap.showsLongWindow == false)
+
+        // pacingWindow's kind, value, and reset equal fiveHour
+        #expect(snap.pacingWindow.kind == .fiveHour)
+        #expect(snap.pacingWindow.usedPercentage == 25)
+        #expect(snap.pacingWindow.resetsAt == fiveHourReset)
+
+        // raw weekly monthly remains available
+        #expect(snap.weekly.kind == .monthly)
+        #expect(snap.weekly.usedPercentage == 80)
+        #expect(snap.weekly.resetsAt == monthlyReset)
+
+        // loading zai has !showsLongWindow and pacingWindow equal fiveHour
+        let loadingSnap = ProviderSnapshot.loading(.zai)
+        #expect(loadingSnap.showsLongWindow == false)
+        #expect(loadingSnap.pacingWindow.kind == .fiveHour)
+
+        // other providers with monthly preserve showsLongWindow and pacingWindow
+        let museSnap = ProviderSnapshot(
+            provider: .muse,
+            fiveHour: makeWindow(.fiveHour, used: 10),
+            weekly: makeWindow(.monthly, used: 50, resetsAt: monthlyReset),
+            modelWindows: [],
+            detail: nil
+        )
+        #expect(museSnap.showsLongWindow == true)
+        #expect(museSnap.pacingWindow.kind == .monthly)
+    }
+
+    @Test func zaiNoMcpPaceReveal() {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        defaults.set(false, forKey: MenuBarVisibility.defaultsKey(for: .zai))
+        defaults.set(true, forKey: MenuBarVisibility.paceRevealEnabledKey)
+        defaults.set(5.0, forKey: MenuBarVisibility.paceRevealAboveKey)
+
+        // z.ai has monthly MCP reset that would trigger pace reveal if evaluated, but pacingWindow is fiveHour
+        let snap = ProviderSnapshot(
+            provider: .zai,
+            fiveHour: makeWindow(.fiveHour, used: 10),
+            weekly: makeWindow(.monthly, used: 40, resetsAt: now.addingTimeInterval(3.5 * 86_400)),
+            modelWindows: [],
+            detail: nil
+        )
+        // With fiveHour pacing window, UsagePacing.delta is nil, so no pace reveal occurs
+        #expect(MenuBarVisibility.showsInMenuBar(snap, userDefaults: defaults, now: now) == false)
+
+        // Preserve other-provider behavior: claude with weekly pace triggers reveal
+        defaults.set(false, forKey: MenuBarVisibility.defaultsKey(for: .claude))
+        let claudeSnap = makeSnapshot(.claude, weeklyUsed: 40, weeklyReset: now.addingTimeInterval(3.5 * 86_400))
+        #expect(MenuBarVisibility.showsInMenuBar(claudeSnap, userDefaults: defaults, now: now) == true)
+    }
 }

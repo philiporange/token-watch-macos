@@ -81,8 +81,26 @@ function renderProvider(key, data) {
   const windows = card.querySelector("[data-windows]");
   windows.replaceChildren(
     makeWindow("Five-hour window", data.five_hour),
-    makeWindow(data.weekly.kind === "Month" ? "Monthly MCP usage" : "Weekly window", data.weekly),
   );
+  if (key === "zai" && data.weekly.kind === "Month") {
+    const weekly = document.createElement("section");
+    weekly.className = "window";
+    const head = document.createElement("div");
+    head.className = "window-head";
+    const label = document.createElement("span");
+    label.className = "window-label";
+    label.textContent = "Weekly window";
+    const value = document.createElement("span");
+    value.className = "window-value";
+    value.textContent = "∞";
+    head.append(label, value);
+    weekly.append(head);
+    windows.append(weekly);
+  } else {
+    windows.append(
+      makeWindow(data.weekly.kind === "Month" ? "Monthly usage" : "Weekly window", data.weekly),
+    );
+  }
 
   const models = card.querySelector("[data-models]");
   models.replaceChildren();

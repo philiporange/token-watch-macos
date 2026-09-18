@@ -54,15 +54,49 @@ import Testing
 
     @Test func formatterMonthlyLabel() {
         let snap = ProviderSnapshot(
-            provider: .zai,
+            provider: .muse,
             fiveHour: makeWindow(.fiveHour, used: 10),
             weekly: makeWindow(.monthly, used: 50),
             modelWindows: [],
             detail: nil
         )
-        let content = StatusItemFormatter.content(name: "Z", snapshot: snap)
+        let content = StatusItemFormatter.content(name: "Mu", snapshot: snap)
         #expect(content.metrics.contains { $0.label == "1m" })
-        #expect(StatusItemFormatter.text(prefix: "Z", snapshot: snap).contains("1m"))
+        #expect(StatusItemFormatter.text(prefix: "Mu", snapshot: snap).contains("1m"))
+    }
+
+    @Test func formatterZaiSyntheticWeeklyAndNoPace() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let snap = ProviderSnapshot(
+            provider: .zai,
+            fiveHour: makeWindow(.fiveHour, used: 15, resetsAt: now.addingTimeInterval(2 * 3600)),
+            weekly: makeWindow(.monthly, used: 50, resetsAt: now.addingTimeInterval(15 * 86_400)),
+            modelWindows: [],
+            detail: nil
+        )
+
+        // z.ai monthly shows exactly 5h percent + 7d infinity even with monthly reset set (no pace)
+        let content = StatusItemFormatter.content(name: "Z", snapshot: snap)
+        #expect(content.metrics == [
+            StatusItemMetric(label: "5h", value: "15%", isModelScoped: false),
+            StatusItemMetric(label: "7d", value: "∞", isModelScoped: false),
+        ])
+        #expect(StatusItemFormatter.text(prefix: "Z", snapshot: snap) == "Z · 5h 15% · 7d ∞")
+
+        // longWindowOnly produces bare infinity
+        let longOnlyContent = StatusItemFormatter.content(name: "Z", snapshot: snap, longWindowOnly: true)
+        #expect(longOnlyContent.metrics == [
+            StatusItemMetric(label: "", value: "∞", isModelScoped: false),
+        ])
+
+        // loading zai shows 5h -- and 7d infinity
+        let loadingSnap = ProviderSnapshot.loading(.zai)
+        let loadingContent = StatusItemFormatter.content(name: "Z", snapshot: loadingSnap)
+        #expect(loadingContent.metrics == [
+            StatusItemMetric(label: "5h", value: "--", isModelScoped: false),
+            StatusItemMetric(label: "7d", value: "∞", isModelScoped: false),
+        ])
+        #expect(StatusItemFormatter.text(prefix: "Z", snapshot: loadingSnap) == "Z · 5h -- · 7d ∞")
     }
 
     @Test func formatterShortensFableLabel() {

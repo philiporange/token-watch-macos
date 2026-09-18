@@ -203,7 +203,18 @@ private struct ProviderCard: View {
                     UsageRowView(accent: accent, loc: loc, model: model, window: model.window)
                 }
                 UsageRowView(accent: accent, loc: loc, window: snapshot.fiveHour)
-                UsageRowView(accent: accent, loc: loc, window: snapshot.weekly)
+                if snapshot.showsLongWindow {
+                    UsageRowView(accent: accent, loc: loc, window: snapshot.weekly)
+                } else {
+                    HStack {
+                        Text(loc.windowLabel(.weekly))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 8)
+                        Text("∞")
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    }
+                }
             }
             .opacity(isRefreshing ? 0.5 : 1)
         }
