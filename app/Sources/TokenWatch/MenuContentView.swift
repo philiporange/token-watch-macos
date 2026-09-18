@@ -65,27 +65,35 @@ struct MenuContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            cardStack
+            cardGrid
             footer
         }
-        .frame(width: 440)
+        .frame(width: store.visibleSnapshots.count > 1 ? 858 : 440)
         .transaction { $0.animation = nil }
     }
 
     // MARK: Cards
 
-    private var cardStack: some View {
-        VStack(spacing: 10) {
-            if store.visibleSnapshots.isEmpty {
+    private var cardGrid: some View {
+        let snapshots = store.visibleSnapshots
+        return VStack(spacing: 10) {
+            if snapshots.isEmpty {
                 emptyCard
             } else {
-                ForEach(store.visibleSnapshots, id: \.provider) { snapshot in
-                    ProviderCard(
-                        store: store,
-                        snapshot: snapshot,
-                        showGeminiOtherModels: showGeminiOtherModels,
-                        loc: loc
-                    )
+                Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 10) {
+                    ForEach(Array(stride(from: 0, to: snapshots.count, by: 2)), id: \.self) { row in
+                        GridRow {
+                            ForEach(snapshots[row..<min(row + 2, snapshots.count)], id: \.provider) { snapshot in
+                                ProviderCard(
+                                    store: store,
+                                    snapshot: snapshot,
+                                    showGeminiOtherModels: showGeminiOtherModels,
+                                    loc: loc
+                                )
+                                .frame(width: 408)
+                            }
+                        }
+                    }
                 }
             }
         }
