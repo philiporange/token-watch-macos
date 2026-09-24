@@ -15,6 +15,30 @@ import Testing
         }
     }
 
+    @Test func fetchCompletesHandshakeAndReturnsWeeklyUsage() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("codex")
+        let script = #"""
+        #!/bin/sh
+        IFS= read -r initialize
+        printf '%s\n' '{"id":1,"result":{}}'
+        IFS= read -r initialized
+        IFS= read -r request
+        printf '%s\n' '{"method":"account/updated","params":{}}'
+        printf '%s\n' '{"id":2,"result":{"rateLimits":{"planType":"pro","primary":{"usedPercent":27,"windowDurationMins":10080,"resetsAt":1790716921},"secondary":null}}}'
+        while IFS= read -r line; do :; done
+        """#
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+
+        let snapshot = await CodexProbe(executablePath: executable.path).fetch()
+        #expect(snapshot.weekly.usedPercentage == 27)
+        #expect(snapshot.weekly.resetsAt == Date(timeIntervalSince1970: 1790716921))
+        #expect(snapshot.fiveHour.usedPercentage == nil)
+        #expect(snapshot.detail == "Plan: pro")
+    }
+
     // MARK: - classifyWindows
 
     @Test func classifyByDurationRegardlessOfOrder() {

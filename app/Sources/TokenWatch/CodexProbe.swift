@@ -29,11 +29,15 @@ struct CodexRateLimits: Sendable, Equatable {
 // MARK: - CodexProbe
 
 struct CodexProbe: Sendable {
-    init() {}
+    private let executablePath: String?
+
+    init(executablePath: String? = nil) {
+        self.executablePath = executablePath
+    }
 
     func fetch() async -> ProviderSnapshot {
         do {
-            guard let codexPath = ProcessRunner.which("codex") else {
+            guard let codexPath = executablePath ?? ProcessRunner.which("codex") else {
                 throw ProcessRunnerError.executableNotFound("codex")
             }
 
@@ -55,7 +59,8 @@ struct CodexProbe: Sendable {
                 try? stdinPipe.fileHandleForWriting.close()
                 if process.isRunning {
                     process.terminate()
-                    process.waitUntilExit()
+                    // Foundation reaps the child asynchronously. Waiting here can
+                    // stall the completed refresh on a cooperative executor.
                 }
             }
 
