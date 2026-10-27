@@ -133,7 +133,7 @@ struct MenuContentView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                             .font(.system(size: 10))
-                        Text(lastUpdated, format: Date.FormatStyle(date: .omitted, time: .shortened))
+                        Text(lastUpdated, format: Date.FormatStyle(date: .omitted, time: .standard))
                             .font(.system(size: 11, design: .monospaced))
                     }
                     .foregroundStyle(.tertiary)
@@ -187,7 +187,7 @@ private var cardBackground: some View {
 // MARK: - ProviderCard
 
 private struct ProviderCard: View {
-    let store: UsageStore
+    @ObservedObject var store: UsageStore
     let snapshot: ProviderSnapshot
     let showGeminiOtherModels: Bool
     let loc: Loc
@@ -257,7 +257,7 @@ private struct ProviderCard: View {
             }
 
             if let lastUpdated {
-                Text(lastUpdated, format: Date.FormatStyle(date: .omitted, time: .shortened))
+                Text(lastUpdated, format: Date.FormatStyle(date: .omitted, time: .standard))
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(.tertiary)
             }
