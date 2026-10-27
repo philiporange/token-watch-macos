@@ -391,7 +391,9 @@ final class UsageStore: ObservableObject {
 
         let lowercasedMessage = message(in: current)?.lowercased() ?? ""
         if lowercasedMessage.contains("http 429") ||
-            lowercasedMessage.contains("rate limit") {
+            lowercasedMessage.contains("too many requests") ||
+            lowercasedMessage.contains("rate limit exceeded") ||
+            lowercasedMessage.contains("rate_limit_exceeded") {
             preservedFailureCounts[provider, default: 0] += 1
             return previous
         }

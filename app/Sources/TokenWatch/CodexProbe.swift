@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // MARK: - Support Types
@@ -30,14 +31,31 @@ struct CodexRateLimits: Sendable, Equatable {
 
 struct CodexProbe: Sendable {
     private let executablePath: String?
+    private let timeout: TimeInterval
 
-    init(executablePath: String? = nil) {
+    init(executablePath: String? = nil, timeout: TimeInterval = 20) {
         self.executablePath = executablePath
+        self.timeout = timeout
     }
 
     func fetch() async -> ProviderSnapshot {
+        let cancellation = CodexRequestCancellation()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    continuation.resume(returning: fetchSync(cancellation: cancellation))
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+
+    private func fetchSync(cancellation: CodexRequestCancellation) -> ProviderSnapshot {
         do {
-            guard let codexPath = executablePath ?? ProcessRunner.which("codex") else {
+            try cancellation.check()
+            let directories = ProcessRunner.pathDirectories()
+            guard let codexPath = executablePath ?? ProcessRunner.which("codex", directories: directories) else {
                 throw ProcessRunnerError.executableNotFound("codex")
             }
 
@@ -48,7 +66,10 @@ struct CodexProbe: Sendable {
             process.executableURL = URL(fileURLWithPath: codexPath)
             process.arguments = ["-s", "read-only", "app-server"]
             process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.homeDirectoryForCurrentUser.path)
-            process.environment = ProcessRunner.environment()
+            process.environment = ProcessRunner.environment(
+                base: ProcessInfo.processInfo.environment,
+                pathDirectories: directories
+            )
             process.standardInput = stdinPipe
             process.standardOutput = stdoutPipe
             process.standardError = FileHandle.nullDevice
@@ -57,15 +78,25 @@ struct CodexProbe: Sendable {
 
             defer {
                 try? stdinPipe.fileHandleForWriting.close()
+                try? stdoutPipe.fileHandleForReading.close()
                 if process.isRunning {
                     process.terminate()
-                    // Foundation reaps the child asynchronously. Waiting here can
-                    // stall the completed refresh on a cooperative executor.
+                    let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
+                    while process.isRunning && ContinuousClock.now < deadline {
+                        Thread.sleep(forTimeInterval: 0.01)
+                    }
+                    if process.isRunning {
+                        kill(process.processIdentifier, SIGKILL)
+                    }
                 }
             }
 
             let stdinHandle = stdinPipe.fileHandleForWriting
-            let stdoutLines = stdoutPipe.fileHandleForReading.bytes.lines
+            var reader = CodexResponseReader(
+                handle: stdoutPipe.fileHandleForReading,
+                deadline: ContinuousClock.now.advanced(by: .seconds(max(0, timeout))),
+                cancellation: cancellation
+            )
 
             let initRequest: [String: Any] = [
                 "jsonrpc": "2.0",
@@ -79,7 +110,7 @@ struct CodexProbe: Sendable {
                 ]
             ]
             try writeJSONLine(initRequest, to: stdinHandle)
-            _ = try await readResponse(withID: 1, from: stdoutLines)
+            _ = try reader.readResponse(withID: 1)
 
             let initializedNotification: [String: Any] = [
                 "jsonrpc": "2.0",
@@ -95,7 +126,7 @@ struct CodexProbe: Sendable {
                 "params": [:]
             ]
             try writeJSONLine(rateLimitsRequest, to: stdinHandle)
-            let response2 = try await readResponse(withID: 2, from: stdoutLines)
+            let response2 = try reader.readResponse(withID: 2)
 
             guard let result = response2["result"] as? [String: Any],
                   let rateLimits = result["rateLimits"] as? [String: Any] else {
@@ -177,6 +208,73 @@ struct CodexProbe: Sendable {
 
     func numericValue(_ value: Any?) -> Double? {
         TokenWatch_numericValue(value)
+    }
+}
+
+/// Shares cancellation with the worker that owns the subprocess and its pipes.
+private final class CodexRequestCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    func cancel() {
+        lock.withLock { cancelled = true }
+    }
+
+    func check() throws {
+        if lock.withLock({ cancelled }) {
+            throw CancellationError()
+        }
+    }
+}
+
+/// Reads complete JSON lines with a deadline, preserving buffered data between responses.
+private struct CodexResponseReader {
+    let handle: FileHandle
+    let deadline: ContinuousClock.Instant
+    let cancellation: CodexRequestCancellation
+    private var buffer = Data()
+
+    init(handle: FileHandle, deadline: ContinuousClock.Instant, cancellation: CodexRequestCancellation) {
+        self.handle = handle
+        self.deadline = deadline
+        self.cancellation = cancellation
+    }
+
+    mutating func readResponse(withID id: Int) throws -> [String: Any] {
+        while true {
+            try cancellation.check()
+            guard ContinuousClock.now < deadline else {
+                throw ProcessRunnerError.invalidResponse("Codex app-server timed out. Try refreshing again.")
+            }
+
+            if let newline = buffer.firstIndex(of: 0x0A) {
+                let line = String(decoding: buffer[..<newline], as: UTF8.self)
+                buffer.removeSubrange(...newline)
+                if let response = try codexResponse(from: line, withID: id) {
+                    return response
+                }
+                continue
+            }
+
+            var descriptor = pollfd(fd: handle.fileDescriptor, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&descriptor, 1, 50)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if ready == 0 { continue }
+
+            var bytes = [UInt8](repeating: 0, count: 16_384)
+            let count = read(handle.fileDescriptor, &bytes, bytes.count)
+            if count < 0 {
+                if errno == EINTR { continue }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            guard count > 0 else {
+                throw ProcessRunnerError.invalidResponse("Codex app-server closed before returning response id \(id).")
+            }
+            buffer.append(contentsOf: bytes.prefix(count))
+        }
     }
 }
 
@@ -287,26 +385,28 @@ func readResponse<S: AsyncSequence>(
     from lines: S
 ) async throws -> [String: Any] where S.Element == String {
     for try await line in lines {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { continue }
-
-        guard let data = trimmed.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            continue
-        }
-
-        if let messageID = integerValue(json["id"]), messageID == id {
-            if let errorObj = json["error"] as? [String: Any],
-               let errorMessage = errorObj["message"] as? String {
-                throw ProcessRunnerError.invalidResponse(errorMessage)
-            } else if let errorMessage = json["error"] as? String {
-                throw ProcessRunnerError.invalidResponse(errorMessage)
-            }
-            return json
+        if let response = try codexResponse(from: line, withID: id) {
+            return response
         }
     }
 
     throw ProcessRunnerError.invalidResponse("Codex app-server closed before returning response id \(id).")
+}
+
+private func codexResponse(from line: String, withID id: Int) throws -> [String: Any]? {
+    guard let data = line.data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          integerValue(json["id"]) == id else {
+        return nil
+    }
+
+    if let errorObj = json["error"] as? [String: Any],
+       let errorMessage = errorObj["message"] as? String {
+        throw ProcessRunnerError.invalidResponse(errorMessage)
+    } else if let errorMessage = json["error"] as? String {
+        throw ProcessRunnerError.invalidResponse(errorMessage)
+    }
+    return json
 }
 
 func integerValue(_ value: Any?) -> Int? {

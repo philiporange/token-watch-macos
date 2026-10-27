@@ -69,6 +69,31 @@ import Testing
         #expect(store.lastUpdated != nil)
     }
 
+    @Test func codexFetchErrorDoesNotSilentlyPreserveStaleUsage() async {
+        let (defaults, suite) = freshDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let error = "Failed to fetch rate limits: HTTP 401 Unauthorized"
+        let store = UsageStore(
+            claudeProbe: stub(makeSnapshot(.claude)),
+            codexProbe: ProbeStub(queue: ProbeQueue([
+                makeSnapshot(.codex, weeklyUsed: 12),
+                makeSnapshot(.codex, fiveHourMessage: error, weeklyMessage: error),
+                makeSnapshot(.codex, weeklyUsed: 27),
+            ])),
+            userDefaults: defaults,
+            startRefreshLoop: false
+        )
+
+        await store.refresh(.codex)
+        #expect(store.codex.weekly.usedPercentage == 12)
+        await store.refresh(.codex)
+        #expect(store.codex.weekly.usedPercentage == nil)
+        #expect(store.codex.weekly.message == error)
+        #expect(!store.isRefreshing)
+        await store.refresh(.codex)
+        #expect(store.codex.weekly.usedPercentage == 27)
+    }
+
     // MARK: - Transient-auth forgiveness
 
     @Test func transientAuthForgiveness() async {
