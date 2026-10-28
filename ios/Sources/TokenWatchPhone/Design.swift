@@ -14,7 +14,7 @@ enum Palette {
 
     static func provider(_ name: String) -> Color {
         switch name {
-        case "Claude": Color(red: 0.88, green: 0.24, blue: 0.09)
+        case "Claude": Color(red: 0.84, green: 0.20, blue: 0.06)
         case "Codex": accent
         case "Gemini": Color(red: 0.43, green: 0.16, blue: 0.92)
         case "Muse": Color(red: 0.81, green: 0.05, blue: 0.46)
@@ -27,11 +27,12 @@ enum Palette {
 
 struct Eyebrow: View {
     let text: String
+    var color: Color = Palette.muted
     var body: some View {
         Text(text.uppercased())
             .font(.system(size: 10, weight: .medium, design: .monospaced))
             .tracking(1)
-            .foregroundStyle(Palette.muted)
+            .foregroundStyle(color)
     }
 }
 

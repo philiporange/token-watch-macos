@@ -105,16 +105,17 @@ struct ResetDetailsView: View {
                 }
                 .padding(24).frame(maxWidth: 600).frame(maxWidth: .infinity)
             }
-            .background(Palette.paper.ignoresSafeArea())
+            .background(Palette.reset.ignoresSafeArea())
             .foregroundStyle(Palette.ink)
             .refreshable { await store.refresh(force: true) }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
-            .toolbarBackground(Palette.paper, for: .navigationBar)
+            .toolbarBackground(Palette.reset, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDragIndicator(.visible)
+        .presentationBackground(Palette.reset)
         .task { await notifications.refreshAuthorization() }
     }
 
@@ -139,6 +140,6 @@ struct ResetDetailsView: View {
                     .font(.system(size: 23, weight: .semibold))
             }
         }
-        .padding(20).frame(maxWidth: .infinity, alignment: .leading).background(Palette.reset)
+        .padding(.vertical, 20).frame(maxWidth: .infinity, alignment: .leading)
     }
 }

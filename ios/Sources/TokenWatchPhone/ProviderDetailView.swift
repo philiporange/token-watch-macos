@@ -10,38 +10,38 @@ struct ProviderDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Eyebrow(text: "Limits")
+                        Eyebrow(text: "Limits", color: .white)
                         Text(provider.provider)
                             .font(.system(size: 38, weight: .bold)).tracking(-1.5)
-                            .foregroundStyle(Palette.provider(provider.provider))
+                            .foregroundStyle(.white)
                         if let detail = provider.detail {
-                            Text(detail).font(.system(size: 13)).foregroundStyle(Palette.muted)
+                            Text(detail).font(.system(size: 13)).foregroundStyle(.white)
                         }
                     }
                     VStack(spacing: 24) {
                         limit(provider.fiveHour, title: "Session")
-                        Divider().overlay(Palette.line)
+                        Rectangle().fill(.white.opacity(0.25)).frame(height: 1)
                         limit(provider.weekly, title: provider.weekly.title)
                     }
                     .padding(.vertical, 8)
 
                     if let pace = provider.paceDelta {
                         VStack(alignment: .leading, spacing: 12) {
-                            Eyebrow(text: "Pacing")
+                            Eyebrow(text: "Pacing", color: .white)
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text(abs(pace).formatted(.number.precision(.fractionLength(0))) + "%")
                                     .font(.system(size: 36, weight: .medium)).tracking(-1.5)
                                 Text(pace >= 0 ? "under pace" : "over pace")
                                     .font(.system(size: 14))
                             }
-                            .foregroundStyle(pace >= 0 ? Palette.green : Palette.rust)
+                            .foregroundStyle(.white)
                             Text("Remaining allowance compared with time left in the Mac’s pacing window.")
-                                .font(.system(size: 12)).foregroundStyle(Palette.muted).lineSpacing(4)
+                                .font(.system(size: 12)).foregroundStyle(.white).lineSpacing(4)
                         }
                     }
                     if !provider.modelWindows.isEmpty {
                         VStack(alignment: .leading, spacing: 20) {
-                            Eyebrow(text: "Model allowances")
+                            Eyebrow(text: "Model allowances", color: .white)
                             ForEach(provider.modelWindows) { model in
                                 limit(model.window, title: model.modelName)
                             }
@@ -50,9 +50,9 @@ struct ProviderDetailView: View {
                     }
                     if let updated = provider.updatedAt {
                         VStack(alignment: .leading, spacing: 7) {
-                            Eyebrow(text: "Last read on your Mac")
+                            Eyebrow(text: "Last read on your Mac", color: .white)
                             Text(updated.formatted(date: .abbreviated, time: .shortened))
-                                .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                                .font(.system(size: 12)).foregroundStyle(.white)
                         }
                     }
                 }
@@ -60,17 +60,20 @@ struct ProviderDetailView: View {
                 .frame(maxWidth: 600)
                 .frame(maxWidth: .infinity)
             }
-            .background(Palette.paper.ignoresSafeArea())
-            .foregroundStyle(Palette.ink)
+            .background(Palette.provider(provider.provider).ignoresSafeArea())
+            .foregroundStyle(.white)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }.font(.system(size: 14, weight: .medium))
                 }
             }
-            .toolbarBackground(Palette.paper, for: .navigationBar)
+            .toolbarBackground(Palette.provider(provider.provider), for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .tint(.white)
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDragIndicator(.visible)
+        .presentationBackground(Palette.provider(provider.provider))
     }
 
     private func limit(_ window: UsageWindow, title: String) -> some View {
@@ -80,19 +83,19 @@ struct ProviderDetailView: View {
                 Spacer()
                 Text(UsageText.percentage(window.usedPercentage) + (window.usedPercentage == nil ? "" : "%"))
                     .font(.system(size: 30, weight: .medium)).monospacedDigit().tracking(-1)
-                    .foregroundStyle(Palette.provider(provider.provider))
+                    .foregroundStyle(.white)
             }
-            UsageTrack(fraction: window.fraction, color: Palette.provider(provider.provider))
+            UsageTrack(fraction: window.fraction, color: .white)
             if let percentage = window.usedPercentage {
                 Text("\(max(0, 100 - percentage).formatted(.number.precision(.fractionLength(0))))% remaining")
-                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    .font(.system(size: 12)).foregroundStyle(.white)
             }
             if let message = window.message {
-                Text(message).font(.system(size: 12)).foregroundStyle(Palette.muted).lineSpacing(4)
+                Text(message).font(.system(size: 12)).foregroundStyle(.white).lineSpacing(4)
             }
             if let reset = window.resetsAt {
                 Text("Resets " + reset.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.muted)
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(.white)
             }
         }
     }

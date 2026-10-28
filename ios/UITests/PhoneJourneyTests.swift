@@ -21,8 +21,10 @@ final class PhoneJourneyTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["LIMITS"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Weekly"].exists)
         capture("Provider detail")
+        waitForNotificationBannerToClear()
         app.buttons["Done"].tap()
 
+        waitForNotificationBannerToClear()
         app.buttons["connection"].tap()
         let address = app.textFields["mac-address"]
         XCTAssertTrue(address.waitForExistence(timeout: 5))
@@ -100,6 +102,13 @@ final class PhoneJourneyTests: XCTestCase {
         app.activate()
         XCTAssertEqual(app.buttons["connection"].value as? String, "Connected")
         capture("Connected after returning to app")
+    }
+
+    private func waitForNotificationBannerToClear() {
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = system.descendants(matching: .any).matching(identifier: "NotificationShortLookView").firstMatch
+        let clear = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: banner)
+        XCTAssertEqual(XCTWaiter.wait(for: [clear], timeout: 15), .completed, "A notification must clear before tapping the toolbar beneath it.")
     }
 
     private func capture(_ name: String) {

@@ -17,15 +17,15 @@ struct DashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                masthead
+                masthead.padding(.horizontal, 24).padding(.top, 12)
                 if let snapshot = store.snapshot {
-                    sourceStatus(snapshot).padding(.top, 4).padding(.bottom, 20)
-                    resetBanner.padding(.bottom, 18)
-                    periodPicker.padding(.bottom, 6)
+                    sourceStatus(snapshot).padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 12)
+                    resetBanner
+                    periodPicker.padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 10)
                     if let message = store.errorMessage {
-                        notice("\(message) Retrying automatically.").padding(.vertical, 16)
+                        notice("\(message) Retrying automatically.").padding(.horizontal, 24).padding(.vertical, 16)
                     }
-                    VStack(spacing: 8) {
+                    VStack(spacing: 0) {
                         ForEach(snapshot.providers) { provider in
                             Button { selectedProvider = provider } label: {
                                 ProviderRow(provider: provider, window: period == .session ? provider.fiveHour : provider.weekly)
@@ -37,21 +37,19 @@ struct DashboardView: View {
                     }
                     Text("PULL TO REFRESH YOUR MAC")
                         .font(.system(size: 10, design: .monospaced)).tracking(1)
-                        .foregroundStyle(Palette.muted)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.top, 28)
+                        .padding(.top, 24).padding(.bottom, 44)
+                        .background(Palette.provider(snapshot.providers.last?.provider ?? ""))
                 } else {
                     resetBanner.padding(.top, 18)
-                    welcome.padding(.top, 60)
+                    welcome.padding(.horizontal, 24).padding(.top, 60).padding(.bottom, 44)
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 12)
-            .padding(.bottom, 32)
-            .frame(maxWidth: 600)
             .frame(maxWidth: .infinity)
         }
-        .background(Palette.paper.ignoresSafeArea())
+        .background(Palette.reset.ignoresSafeArea())
+        .ignoresSafeArea(.container, edges: .bottom)
         .foregroundStyle(Palette.ink)
         .refreshable { await refreshAll() }
         .sheet(isPresented: $notifications.openDetails) { ResetDetailsView(store: resets, notifications: notifications) }
@@ -179,7 +177,7 @@ struct DashboardView: View {
                 }
             }
             .foregroundStyle(.black)
-            .padding(18)
+            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 30)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Palette.reset)
         }
@@ -188,7 +186,7 @@ struct DashboardView: View {
         .overlay(alignment: .bottomTrailing) {
             Link("codex-resets.com ↗", destination: URL(string: "https://codex-resets.com")!)
                 .font(.system(size: 9, design: .monospaced)).foregroundStyle(.black.opacity(0.65))
-                .padding(.trailing, 18).padding(.bottom, 6)
+                .padding(.trailing, 24).padding(.bottom, 6)
                 .accessibilityLabel("Data from Codex Resets")
         }
     }
@@ -263,10 +261,10 @@ private struct ProviderRow: View {
                 }
             }
             .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(.white.opacity(0.86))
+            .foregroundStyle(.white)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 17)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
         .background(Palette.provider(provider.provider))
         .accessibilityElement(children: .combine)
     }

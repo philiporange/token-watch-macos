@@ -80,17 +80,18 @@ struct ConnectionView: View {
                 .padding(24)
                 .frame(maxWidth: 600).frame(maxWidth: .infinity)
             }
-            .background(Palette.paper.ignoresSafeArea())
+            .background(Palette.reset.ignoresSafeArea())
             .foregroundStyle(Palette.ink)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }.disabled(isConnecting)
                 }
             }
-            .toolbarBackground(Palette.paper, for: .navigationBar)
+            .toolbarBackground(Palette.reset, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .presentationDragIndicator(.visible)
+        .presentationBackground(Palette.reset)
         .interactiveDismissDisabled(isConnecting)
         .onAppear {
             address = store.connection?.address ?? ""
