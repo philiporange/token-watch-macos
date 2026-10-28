@@ -649,7 +649,7 @@ struct SettingsView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                 if usageAPILANEnabled {
-                    Text("Read-only usage on the same trusted network. Pair your iPhone with the key below.")
+                    Text("Share usage and allow refreshes on the same trusted network. Pair your iPhone with the key below.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Copy pairing key") {
@@ -667,7 +667,7 @@ struct SettingsView: View {
             Text(loc.usageAPI)
         } footer: {
             Text(usageAPIEnabled && usageAPILANEnabled
-                 ? "Read-only usage is shared on your local network. Remote requests require your pairing key."
+                 ? "Usage and refresh are available on your local network. Remote requests require your pairing key."
                  : loc.usageAPIDesc)
         }
     }

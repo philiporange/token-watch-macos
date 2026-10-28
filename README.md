@@ -47,12 +47,19 @@ Options → Local API serves the app's current readings as JSON on `127.0.0.1` (
 - `GET /usage` returns every provider keyed by `claude`, `codex`, `gemini`, `zai`, `muse`, `alicloud`, and `commandcode`, plus `last_updated`.
 - `GET /usage/<provider>` returns one provider: `five_hour`, `weekly`, `model_windows`, `detail`, `pace_delta`, and `updated_at`.
 - `GET /health` returns `{"status": "ok"}`.
+- `POST /refresh` requests fresh readings from every provider, waits for collection to finish, and returns the same payload as `GET /usage`. Concurrent refresh requests share collection work.
 
 ### iPhone companion
 
-The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, and pacing. It reads the Mac app directly, refreshes every minute while open, and retains its last reading offline. Provider credentials stay on the Mac.
+The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, and pacing. It reads the Mac app directly every minute while open and retains its last reading offline. Pull down or tap refresh to request a fresh collection on the Mac; the progress indicator stays active until the Mac responds. Provider credentials stay on the Mac.
+
+The saved connection recovers automatically on foreground and network changes. Failed reads retry after 5, 10, 20, then 30 seconds while open, without discarding pairing or cached readings. Background checks run when iOS grants time; the app does not require a continuously open socket.
 
 In the Mac's **Options → Local API**, enable the API and **Share with iPhone**. In the iPhone app, tap the sliders button, enter the displayed Mac address, and paste **Copy pairing key**. Keep Token Watch running and both devices on the same trusted network. LAN sharing uses HTTP and requires the pairing key; local loopback requests keep working without it. Regenerating the key disconnects previously paired clients until their key is updated.
+
+The reset panel uses the public [Codex Resets API](https://codex-resets.com/api/docs), the same source as Sandford's `com.developer-tools.codex-resets` watcher. The phone checks directly over HTTPS, including away from the Mac. An announced regular reset stays pending until execution evidence arrives; an elapsed deadline, missing schedule, forecast, or banked credit does not count as a completed reset. Estimates are separate from your account's normal weekly reset.
+
+Tap the bell to enable notifications for new announcements, a reminder 15 minutes before an expected reset, and newly reported resets. Scheduled reminders can arrive while the app is closed. New announcements are discovered while open or during background refresh at times chosen by iOS, so closed-app discovery is not guaranteed every minute. The app deduplicates alerts and replaces or removes pending reminders when schedules change or execution is confirmed. If an announcement is first discovered within 15 minutes of its deadline, its announcement alert serves as the immediate notice.
 
 Requires iOS 17 or later. Build and install on a connected iPhone on sandford:
 
@@ -64,7 +71,7 @@ ios-install iphone TokenWatchPhone.xcodeproj --scheme TokenWatchPhone --allow-pr
 
 Signing uses the development team in `ios/project.yml`. The project also opens directly in Xcode. Focused client checks run with `cd ios && swift test`; API checks use `cd app && swift test --filter UsageAPIServerTests`.
 
-The `TokenWatchPhone` UI test scheme exercises a paired Mac connection on a physical iPhone. The separate `TokenWatchOfflineCheck` scheme verifies saved readings with the Mac app stopped; restart the Mac app after that check.
+The `TokenWatchPhone` UI test scheme exercises a paired Mac connection on a physical iPhone. Its reset-alert test requests notification permission and sends one labelled test alert. The separate `TokenWatchOfflineCheck` scheme verifies saved readings with the Mac app stopped; restart the Mac app after that check. `TokenWatchRecoveryCheck` starts offline, emits `TOKEN_WATCH_RECOVERY_OFFLINE_OBSERVED`, and expects the host to restart the Mac app so the phone can reconnect automatically. Run only the test methods relevant to a change.
 
 For a personal device build, an optional, git-ignored `ios/Resources/BootstrapConnection.plist` can contain `address` and `token` strings. It pairs the app on first launch, then stores the connection in the iPhone Keychain. Omit this file from builds shared with anyone else.
 

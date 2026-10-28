@@ -4,6 +4,22 @@ import Testing
 @testable import TokenWatch
 
 struct UsageAPIServerTests {
+    @MainActor private func offlineStore(
+        claudeProbe: any ProviderSnapshotFetching,
+        codexProbe: any ProviderSnapshotFetching
+    ) -> UsageStore {
+        UsageStore(
+            claudeProbe: claudeProbe,
+            codexProbe: codexProbe,
+            geminiProbe: CountingProbe(snapshot: makeSnapshot(.gemini), counter: CallCounter()),
+            zaiProbe: CountingProbe(snapshot: makeSnapshot(.zai), counter: CallCounter()),
+            museProbe: CountingProbe(snapshot: makeSnapshot(.muse), counter: CallCounter()),
+            alicloudProbe: CountingProbe(snapshot: makeSnapshot(.alicloud), counter: CallCounter()),
+            commandCodeProbe: CountingProbe(snapshot: makeSnapshot(.commandCode), counter: CallCounter()),
+            startRefreshLoop: false
+        )
+    }
+
     private func router(now: Date = Date(timeIntervalSince1970: 1_790_000_000)) -> UsageAPIRouter {
         UsageAPIRouter(
             providers: { provider in
@@ -44,6 +60,7 @@ struct UsageAPIServerTests {
         #expect(claude["detail"] as? String == "Max")
         #expect(claude["pace_delta"] as? Double != nil)
         #expect((claude["updated_at"] as? String)?.hasPrefix("2026-") == true)
+        #expect(router.respond(method: "POST", path: "/refresh").body == bulk.body)
 
         let single = router.respond(method: "GET", path: "/usage/CommandCode")
         #expect(single.status == 200)
@@ -56,6 +73,8 @@ struct UsageAPIServerTests {
         #expect(router.respond(method: "GET", path: "/usage/nope").status == 404)
         #expect(router.respond(method: "GET", path: "/").status == 404)
         #expect(router.respond(method: "POST", path: "/usage").status == 405)
+        #expect(router.respond(method: "POST", path: "/health").status == 405)
+        #expect(router.respond(method: "GET", path: "/refresh").status == 404)
         #expect(UsageAPIRouter.parseRequestLine("GET /usage HTTP/1.1\r\nHost: x")! == ("GET", "/usage"))
         #expect(UsageAPIRouter.parseRequestLine("garbage") == nil)
 
@@ -114,12 +133,12 @@ struct UsageAPIServerTests {
     }
 
     @Test(arguments: [false, true]) @MainActor func listenerServesUsageOverLoopback(lanEnabled: Bool) async throws {
-        let store = UsageStore(
-            claudeProbe: CountingProbe(snapshot: makeSnapshot(.claude, fiveHourUsed: 5, weeklyUsed: 6), counter: CallCounter()),
-            codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: CallCounter()),
-            startRefreshLoop: false
+        let probe = SequencedAPIProbe([makeSnapshot(.claude, fiveHourUsed: 5, weeklyUsed: 6),
+                                       makeSnapshot(.claude, fiveHourUsed: 11, weeklyUsed: 12)])
+        let store = offlineStore(
+            claudeProbe: probe,
+            codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: CallCounter())
         )
-        await store.refresh(.claude)
         let server = UsageAPIServer(store: store, userDefaults: UserDefaults(suiteName: "UsageAPIServerListenerTests")!, followSettings: false)
         let port = Int.random(in: 20_000 ... 60_000)
         server.start(port: port, lanEnabled: lanEnabled, accessToken: lanEnabled ? "socket-test-key" : nil)
@@ -132,9 +151,91 @@ struct UsageAPIServerTests {
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         let payload = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(payload["provider"] as? String == "Claude")
-        #expect((payload["five_hour"] as? [String: Any])?["used_percentage"] as? Double == 5)
+        #expect((payload["five_hour"] as? [String: Any])?["used_percentage"] as? Double == nil)
+        #expect(await probe.calls == 0)
+
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/refresh")!)
+        request.httpMethod = "POST"
+        let (refreshedData, refreshedResponse) = try await URLSession.shared.data(for: request)
+        #expect((refreshedResponse as? HTTPURLResponse)?.statusCode == 200)
+        let refreshed = try #require(try JSONSerialization.jsonObject(with: refreshedData) as? [String: Any])
+        let refreshedClaude = try #require(refreshed["claude"] as? [String: Any])
+        #expect((refreshedClaude["five_hour"] as? [String: Any])?["used_percentage"] as? Double == 5)
+        #expect(refreshedClaude["updated_at"] as? String != nil)
+        #expect(refreshed["last_updated"] as? String != nil)
+        #expect(await probe.calls == 1)
+
+        let (afterData, _) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/usage")!)
+        #expect(afterData == refreshedData)
+        #expect(await probe.calls == 1)
 
         let (_, health) = try await URLSession.shared.data(from: URL(string: "http://127.0.0.1:\(port)/health")!)
         #expect((health as? HTTPURLResponse)?.statusCode == 200)
     }
+
+    @Test @MainActor func simultaneousRefreshesAndExistingCollectionShareOneProbe() async throws {
+        let paused = PausedAPIProbe(snapshot: makeSnapshot(.claude, fiveHourUsed: 77))
+        let store = offlineStore(claudeProbe: paused,
+                                 codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: CallCounter()))
+        let server = UsageAPIServer(store: store, followSettings: false)
+        let peer = NWEndpoint.hostPort(host: "127.0.0.1", port: 9000)
+        let head = "POST /refresh HTTP/1.1\r\nHost: mac"
+
+        let existing = Task { await store.refresh(.claude) }
+        #expect(await waitUntil { await paused.calls == 1 })
+        let first = Task { await server.respond(to: head, peer: peer) }
+        let second = Task { await server.respond(to: head, peer: peer) }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await paused.calls == 1)
+        await paused.release()
+        await existing.value
+        let firstResponse = await first.value
+        let secondResponse = await second.value
+        #expect(firstResponse.status == 200)
+        #expect(firstResponse.body == secondResponse.body)
+        let body = try json(firstResponse)
+        let claude = try #require(body["claude"] as? [String: Any])
+        #expect((claude["five_hour"] as? [String: Any])?["used_percentage"] as? Double == 77)
+        #expect(await paused.calls == 1)
+    }
+
+    @Test @MainActor func unauthorizedRemoteRefreshDoesNotStartProbes() async {
+        let counter = CallCounter()
+        let store = offlineStore(
+            claudeProbe: CountingProbe(snapshot: makeSnapshot(.claude), counter: counter),
+            codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: CallCounter())
+        )
+        let server = UsageAPIServer(store: store, followSettings: false)
+        server.start(port: Int.random(in: 20_000 ... 60_000), lanEnabled: true, accessToken: "secret")
+        defer { server.stop() }
+        let remote = NWEndpoint.hostPort(host: "192.168.1.8", port: 9000)
+        let missing = await server.respond(to: "POST /refresh HTTP/1.1\r\nHost: mac", peer: remote)
+        let wrong = await server.respond(to: "POST /refresh HTTP/1.1\r\nAuthorization: Bearer wrong", peer: remote)
+        #expect(missing.status == 401)
+        #expect(wrong.status == 401)
+        #expect(await counter.count == 0)
+    }
+}
+
+private actor SequencedAPIProbe: ProviderSnapshotFetching {
+    private var snapshots: [ProviderSnapshot]
+    private(set) var calls = 0
+    init(_ snapshots: [ProviderSnapshot]) { self.snapshots = snapshots }
+    func fetch() -> ProviderSnapshot {
+        calls += 1
+        return snapshots.count > 1 ? snapshots.removeFirst() : snapshots[0]
+    }
+}
+
+private actor PausedAPIProbe: ProviderSnapshotFetching {
+    private let snapshot: ProviderSnapshot
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var calls = 0
+    init(snapshot: ProviderSnapshot) { self.snapshot = snapshot }
+    func fetch() async -> ProviderSnapshot {
+        calls += 1
+        await withCheckedContinuation { continuation = $0 }
+        return snapshot
+    }
+    func release() { continuation?.resume(); continuation = nil }
 }

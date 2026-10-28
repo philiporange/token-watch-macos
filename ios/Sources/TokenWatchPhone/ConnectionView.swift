@@ -74,7 +74,7 @@ struct ConnectionView: View {
                         step("02", "Enable the API and Share with iPhone. Copy the address and pairing key above.")
                         step("03", "Keep both devices on the same trusted network.")
                     }
-                    Text("Refreshes every minute while open. Last readings are saved offline. Provider logins stay on your Mac.")
+                    Text("Refreshes every minute while open and reconnects automatically. Last readings are saved offline. Provider logins stay on your Mac.")
                         .font(.system(size: 12)).foregroundStyle(Palette.muted).lineSpacing(4)
                 }
                 .padding(24)

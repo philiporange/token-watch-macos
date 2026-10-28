@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Security
 import SwiftUI
 import TokenWatchCore
@@ -11,6 +12,8 @@ final class UsageStore: ObservableObject {
     @Published private(set) var isReachable = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var fetchedAt: Date?
+    @Published private(set) var isRequestingFreshReadings = false
+    @Published private(set) var lastRemoteRefresh: Date?
 
     private struct CachedReading: Codable {
         let address: String
@@ -19,6 +22,16 @@ final class UsageStore: ObservableObject {
     }
 
     private let cacheURL = URL.applicationSupportDirectory.appendingPathComponent("usage.json")
+    private var retrySchedule = ConnectionRetrySchedule()
+    private var requestTask: Task<Void, Never>?
+    private var requestID: UUID?
+    private var requestIsForce = false
+    private var requestConnection: MacConnection?
+    private var pathMonitor: NWPathMonitor?
+    private var monitorID: UUID?
+    private let monitorQueue = DispatchQueue(label: "TokenWatch.connection-path")
+
+    var automaticRefreshDelay: TimeInterval { connection == nil ? 60 : retrySchedule.nextDelay }
 
     init() {
         do {
@@ -44,18 +57,48 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    func refresh() async {
-        guard let requestedConnection = connection, !isRefreshing else { return }
-        isRefreshing = true
-        defer { isRefreshing = false }
-        do {
-            let (reading, data) = try await UsageClient.fetch(requestedConnection)
-            guard connection == requestedConnection, !Task.isCancelled else { return }
-            accept(reading, data: data, for: requestedConnection)
-        } catch {
-            guard !Task.isCancelled, connection == requestedConnection else { return }
-            isReachable = false
-            errorMessage = friendlyError(error)
+    func refresh(force: Bool = false) async {
+        guard !Task.isCancelled else { return }
+        while let running = requestTask {
+            let priorID = requestID
+            let priorWasForce = requestIsForce
+            let sameConnection = requestConnection == connection
+            await running.value
+            guard !Task.isCancelled else { return }
+            if sameConnection && (!force || priorWasForce) { return }
+            if requestID == priorID { requestTask = nil }
+        }
+        guard let requestedConnection = connection else { return }
+        let id = UUID()
+        let task = Task { @MainActor in
+            isRefreshing = true
+            isRequestingFreshReadings = force
+            defer {
+                isRefreshing = false
+                isRequestingFreshReadings = false
+            }
+            do {
+                let (reading, data) = try await UsageClient.fetch(requestedConnection, refresh: force)
+                guard connection == requestedConnection else { return }
+                accept(reading, data: data, for: requestedConnection)
+                retrySchedule.recordSuccess()
+                if force { lastRemoteRefresh = .now }
+            } catch {
+                guard connection == requestedConnection else { return }
+                isReachable = false
+                retrySchedule.recordFailure()
+                errorMessage = friendlyError(error)
+            }
+        }
+        requestTask = task
+        requestID = id
+        requestIsForce = force
+        requestConnection = requestedConnection
+        await task.value
+        if requestID == id {
+            requestTask = nil
+            requestID = nil
+            requestConnection = nil
         }
     }
 
@@ -65,7 +108,31 @@ final class UsageStore: ObservableObject {
         try Task.checkCancellation()
         try ConnectionKeychain.save(candidate)
         connection = candidate
+        retrySchedule.recordSuccess()
         accept(reading, data: data, for: candidate)
+    }
+
+    func startMonitoring() {
+        guard pathMonitor == nil else { return }
+        let id = UUID()
+        let monitor = NWPathMonitor()
+        monitorID = id
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            Task { @MainActor [weak self] in
+                guard let self, self.monitorID == id else { return }
+                await self.refresh()
+            }
+        }
+        monitor.start(queue: monitorQueue)
+    }
+
+    func stopMonitoring() {
+        monitorID = nil
+        pathMonitor?.pathUpdateHandler = nil
+        pathMonitor?.cancel()
+        pathMonitor = nil
     }
 
     private func accept(_ reading: UsageSnapshot, data: Data, for connection: MacConnection) {

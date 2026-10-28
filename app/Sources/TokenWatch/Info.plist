@@ -21,7 +21,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Share read-only token usage with your paired iPhone on your local network.</string>
+    <string>Share token usage and allow refreshes from your paired iPhone on your local network.</string>
     <key>NSBonjourServices</key>
     <array><string>_tokenwatch._tcp</string></array>
 	<key>LSUIElement</key>

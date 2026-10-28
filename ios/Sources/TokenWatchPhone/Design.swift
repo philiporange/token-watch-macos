@@ -10,6 +10,7 @@ enum Palette {
     static let green = Color(red: 0.0, green: 0.55, blue: 0.31)
     static let rust = Color(red: 0.85, green: 0.19, blue: 0.10)
     static let accent = Color(red: 0.10, green: 0.29, blue: 0.98)
+    static let reset = Color(red: 0.87, green: 0.98, blue: 0.28)
 
     static func provider(_ name: String) -> Color {
         switch name {
@@ -37,9 +38,9 @@ struct Eyebrow: View {
 struct WatchMark: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 3) {
-            Rectangle().fill(Palette.provider("Claude")).frame(width: 5, height: 16)
-            Rectangle().fill(Palette.provider("Codex")).frame(width: 5, height: 26)
-            Rectangle().fill(Palette.provider("Gemini")).frame(width: 5, height: 21)
+            Rectangle().fill(Palette.accent).frame(width: 5, height: 16)
+            Rectangle().fill(Palette.provider("Claude")).frame(width: 5, height: 26)
+            Rectangle().fill(Palette.reset).frame(width: 5, height: 21)
         }
         .frame(width: 21, height: 26)
         .accessibilityHidden(true)

@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: JD42U22H4R
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: 0.1.0
-    CURRENT_PROJECT_VERSION: 1
+    CURRENT_PROJECT_VERSION: 3
 targets:
   TokenWatchPhone:
     type: application
@@ -47,6 +47,10 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Token Watch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.philiporange.TokenWatchPhone.reset-refresh
+        UIBackgroundModes:
+          - fetch
         UILaunchScreen:
           UIColorName: LaunchBackground
         NSLocalNetworkUsageDescription: Token Watch reads usage from your Mac on the same network. Your provider credentials stay on your Mac.
@@ -81,6 +85,7 @@ schemes:
         - name: TokenWatchPhoneUITests
           skippedTests:
             - PhoneJourneyTests/testOfflineSnapshotRemainsVisible
+            - PhoneJourneyTests/testAutomaticConnectionRecovery
   TokenWatchOfflineCheck:
     build:
       targets:
@@ -90,3 +95,16 @@ schemes:
         - name: TokenWatchPhoneUITests
           skippedTests:
             - PhoneJourneyTests/testPairedDashboardNavigationAndRelaunch
+            - PhoneJourneyTests/testRemoteRefreshAndResetNotifications
+            - PhoneJourneyTests/testAutomaticConnectionRecovery
+  TokenWatchRecoveryCheck:
+    build:
+      targets:
+        TokenWatchPhone: all
+    test:
+      targets:
+        - name: TokenWatchPhoneUITests
+          skippedTests:
+            - PhoneJourneyTests/testPairedDashboardNavigationAndRelaunch
+            - PhoneJourneyTests/testRemoteRefreshAndResetNotifications
+            - PhoneJourneyTests/testOfflineSnapshotRemainsVisible

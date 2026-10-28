@@ -8,6 +8,8 @@ private enum UsagePeriod: String, CaseIterable, Identifiable {
 
 struct DashboardView: View {
     @ObservedObject var store: UsageStore
+    @ObservedObject var resets: CodexResetStore
+    @ObservedObject var notifications: ResetNotifications
     @State private var period = UsagePeriod.longRange
     @State private var showsConnection = false
     @State private var selectedProvider: ProviderUsage?
@@ -17,25 +19,29 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 0) {
                 masthead
                 if let snapshot = store.snapshot {
-                    sourceStatus(snapshot).padding(.top, 4).padding(.bottom, 26)
+                    sourceStatus(snapshot).padding(.top, 4).padding(.bottom, 20)
+                    resetBanner.padding(.bottom, 18)
                     periodPicker.padding(.bottom, 6)
                     if let message = store.errorMessage {
-                        notice(message).padding(.vertical, 16)
+                        notice("\(message) Retrying automatically.").padding(.vertical, 16)
                     }
-                    ForEach(snapshot.providers) { provider in
-                        Button { selectedProvider = provider } label: {
-                            ProviderRow(provider: provider, window: period == .session ? provider.fiveHour : provider.weekly)
+                    VStack(spacing: 8) {
+                        ForEach(snapshot.providers) { provider in
+                            Button { selectedProvider = provider } label: {
+                                ProviderRow(provider: provider, window: period == .session ? provider.fiveHour : provider.weekly)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("provider-\(provider.id)")
+                            .accessibilityHint("Shows all limits and reset times")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("provider-\(provider.id)")
-                        .accessibilityHint("Shows all limits and reset times")
                     }
-                    Text("PULL TO REFRESH")
+                    Text("PULL TO REFRESH YOUR MAC")
                         .font(.system(size: 10, design: .monospaced)).tracking(1)
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 28)
                 } else {
+                    resetBanner.padding(.top, 18)
                     welcome.padding(.top, 60)
                 }
             }
@@ -47,7 +53,8 @@ struct DashboardView: View {
         }
         .background(Palette.paper.ignoresSafeArea())
         .foregroundStyle(Palette.ink)
-        .refreshable { await store.refresh() }
+        .refreshable { await refreshAll() }
+        .sheet(isPresented: $notifications.openDetails) { ResetDetailsView(store: resets, notifications: notifications) }
         .sheet(isPresented: $showsConnection) { ConnectionView(store: store) }
         .sheet(item: $selectedProvider) { provider in
             ProviderDetailView(provider: store.snapshot?.providers.first(where: { $0.id == provider.id }) ?? provider)
@@ -60,6 +67,14 @@ struct DashboardView: View {
                 .font(.system(size: 30, weight: .bold)).tracking(-1.5)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
+            Button { notifications.openDetails = true } label: {
+                Image(systemName: notifications.enabled && notifications.permitted ? "bell.badge.fill" : "bell")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Palette.accent)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Reset alerts")
+            .accessibilityIdentifier("reset-alerts")
             Button { showsConnection = true } label: {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 19, weight: .medium))
@@ -92,7 +107,7 @@ struct DashboardView: View {
     private var connectionLabel: some View {
         HStack(spacing: 6) {
             Circle().fill(store.isReachable ? Palette.green : Palette.rust).frame(width: 5, height: 5)
-            Text(store.isReachable ? (store.connection?.displayName ?? "Mac").uppercased() : "SAVED OFFLINE")
+            Text(store.isRequestingFreshReadings ? "REFRESHING ON MAC…" : store.isReachable ? (store.connection?.displayName ?? "Mac").uppercased() : store.connection == nil ? "SAVED OFFLINE" : "RECONNECTING…")
                 .tracking(0.5)
         }
     }
@@ -128,7 +143,7 @@ struct DashboardView: View {
                 .accessibilityAddTraits(period == item ? .isSelected : [])
             }
             Spacer(minLength: 0)
-            Button { Task { await store.refresh() } } label: {
+            Button { Task { await refreshAll() } } label: {
                 Group {
                     if store.isRefreshing { ProgressView().scaleEffect(0.8) }
                     else { Image(systemName: "arrow.clockwise").font(.system(size: 15)) }
@@ -138,7 +153,50 @@ struct DashboardView: View {
             }
             .disabled(store.isRefreshing)
             .accessibilityLabel("Refresh readings")
+            .accessibilityIdentifier("remote-refresh")
+            .accessibilityValue(store.lastRemoteRefresh == nil ? "Not requested" : "Mac refreshed")
         }
+    }
+
+    private var resetBanner: some View {
+        Button { notifications.openDetails = true } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("CODEX RESET").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1)
+                    Spacer()
+                    Image(systemName: "arrow.up.right").font(.system(size: 14, weight: .semibold))
+                }
+                if let event = resets.tracker.upcoming {
+                    TimelineView(.periodic(from: .now, by: 30)) { timeline in
+                        Text(ResetText.countdown(event.scheduledFor, now: timeline.date))
+                            .font(.system(size: 32, weight: .semibold)).tracking(-1)
+                    }
+                    Text(resets.stale ? "Saved announcement · check for updates" : ResetText.expected(event.scheduledFor))
+                        .font(.system(size: 11))
+                } else {
+                    Text(resets.errorMessage != nil ? "Updates unavailable" : resets.lastChecked == nil ? "Checking announcements" : "No reset scheduled")
+                        .font(.system(size: 20, weight: .semibold)).tracking(-0.5)
+                }
+            }
+            .foregroundStyle(.black)
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.reset)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("codex-reset-banner")
+        .overlay(alignment: .bottomTrailing) {
+            Link("codex-resets.com ↗", destination: URL(string: "https://codex-resets.com")!)
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.black.opacity(0.65))
+                .padding(.trailing, 18).padding(.bottom, 6)
+                .accessibilityLabel("Data from Codex Resets")
+        }
+    }
+
+    private func refreshAll() async {
+        async let usage: Void = store.refresh(force: true)
+        async let reset: Void = resets.refresh(force: true)
+        _ = await (usage, reset)
     }
 
     private var welcome: some View {
@@ -146,18 +204,24 @@ struct DashboardView: View {
             WatchMark().scaleEffect(1.5, anchor: .leading).padding(.bottom, 20)
             Text("Your Mac’s usage.\nOn your phone.")
                 .font(.system(size: 38, weight: .bold)).tracking(-1.7)
-            Text("Connect to Token Watch on the same network.")
+            Text(store.connection == nil ? "Connect to Token Watch on the same network." : "Reconnecting to your Mac automatically.")
                 .font(.system(size: 15)).foregroundStyle(Palette.muted)
-            if let message = store.errorMessage { notice(message) }
+            if let message = store.errorMessage { notice(store.connection == nil ? message : "\(message) Retrying automatically.") }
             if store.isRefreshing {
                 HStack(spacing: 12) { ProgressView(); Text("Connecting…").font(.subheadline) }
             }
-            Button { showsConnection = true } label: {
-                HStack { Text("Connect to Mac"); Spacer(); Image(systemName: "arrow.up.right") }
+            if store.connection == nil {
+                Button { showsConnection = true } label: {
+                    HStack { Text("Connect to Mac"); Spacer(); Image(systemName: "arrow.up.right") }
+                        .font(.system(size: 15, weight: .semibold))
+                        .padding(.vertical, 20).padding(.horizontal, 18)
+                        .foregroundStyle(.white)
+                        .background(Palette.accent)
+                }
+            } else {
+                Button("Try connecting now") { Task { await store.refresh() } }
                     .font(.system(size: 15, weight: .semibold))
-                    .padding(.vertical, 20).padding(.horizontal, 18)
-                    .foregroundStyle(.white)
-                    .background(Palette.accent)
+                    .disabled(store.isRefreshing)
             }
             Text("Provider credentials stay on your Mac.")
                 .font(.system(size: 12)).foregroundStyle(Palette.muted)
@@ -189,8 +253,8 @@ private struct ProviderRow: View {
                 }
                 .accessibilityLabel(window.usedPercentage.map { "\(UsageText.percentage($0)) percent used" } ?? "Usage unavailable")
             }
-            .foregroundStyle(Palette.provider(provider.provider))
-            UsageTrack(fraction: window.fraction, color: Palette.provider(provider.provider))
+            .foregroundStyle(.white)
+            UsageTrack(fraction: window.fraction, color: .white)
             HStack {
                 Text(window.title.uppercased()).tracking(0.7)
                 Spacer()
@@ -199,9 +263,11 @@ private struct ProviderRow: View {
                 }
             }
             .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(Palette.muted)
+            .foregroundStyle(.white.opacity(0.86))
         }
-        .padding(.vertical, 19)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 17)
+        .background(Palette.provider(provider.provider))
         .accessibilityElement(children: .combine)
     }
 }

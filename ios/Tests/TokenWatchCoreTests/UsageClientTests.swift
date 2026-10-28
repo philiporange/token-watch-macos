@@ -43,6 +43,11 @@ final class UsageClientTests: XCTestCase {
         let request = try connection.request()
         XCTAssertEqual(request.url?.absoluteString, "http://sandford.local:8037/usage")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret-key")
+        let refresh = try connection.request(refresh: true)
+        XCTAssertEqual(refresh.url?.absoluteString, "http://sandford.local:8037/refresh")
+        XCTAssertEqual(refresh.httpMethod, "POST")
+        XCTAssertEqual(refresh.value(forHTTPHeaderField: "Authorization"), "Bearer secret-key")
+        XCTAssertEqual(refresh.timeoutInterval, 60)
         XCTAssertEqual(try MacConnection(address: "mac.local", token: "").address, "http://mac.local:8037")
         XCTAssertEqual(try MacConnection(address: "https://example.com", token: "").address, "https://example.com")
         for bad in ["", "ftp://mac.local", "http://user:pass@mac.local", "http://mac.local/other", "http://mac.local?token=secret", "http://mac.local:0"] {

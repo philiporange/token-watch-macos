@@ -53,6 +53,12 @@
                <Test
                   Identifier = "PhoneJourneyTests/testPairedDashboardNavigationAndRelaunch">
                </Test>
+               <Test
+                  Identifier = "PhoneJourneyTests/testRemoteRefreshAndResetNotifications">
+               </Test>
+               <Test
+                  Identifier = "PhoneJourneyTests/testAutomaticConnectionRecovery">
+               </Test>
             </SkippedTests>
          </TestableReference>
       </Testables>

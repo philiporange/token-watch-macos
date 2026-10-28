@@ -186,18 +186,20 @@ struct UsageAPIRouter {
     }()
 
     func respond(method: String, path: String) -> UsageAPIResponse {
+        let route = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? path
+        let segments = route.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        if route == "/refresh" && method == "POST" {
+            return bulkUsage()
+        }
         guard method == "GET" || method == "HEAD" else {
             return error(405, "Method not allowed.")
         }
-        let route = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? path
-        let segments = route.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
 
         if segments == ["health"] {
             return json(["status": "ok"])
         }
         if segments == ["usage"] {
-            let payloads = Dictionary(uniqueKeysWithValues: ProviderKind.allCases.map { ($0.routeKey, providers($0)) })
-            return json(UsageAPIBulkPayload(providers: payloads, lastUpdated: lastUpdated()))
+            return bulkUsage()
         }
         if segments.count == 2, segments[0] == "usage" {
             guard let provider = ProviderKind.from(routeKey: segments[1]) else {
@@ -205,7 +207,12 @@ struct UsageAPIRouter {
             }
             return json(providers(provider))
         }
-        return error(404, "Not found. Try /health, /usage, or /usage/<provider>.")
+        return error(404, "Not found. Try /health, /usage, /usage/<provider>, or POST /refresh.")
+    }
+
+    private func bulkUsage() -> UsageAPIResponse {
+        let payloads = Dictionary(uniqueKeysWithValues: ProviderKind.allCases.map { ($0.routeKey, providers($0)) })
+        return json(UsageAPIBulkPayload(providers: payloads, lastUpdated: lastUpdated()))
     }
 
     private func json<Value: Encodable>(_ value: Value, status: Int = 200) -> UsageAPIResponse {
@@ -290,6 +297,7 @@ final class UsageAPIServer: ObservableObject {
     @Published private(set) var state: State = .stopped
 
     private let router: UsageAPIRouter
+    private let store: UsageStore
     private let userDefaults: UserDefaults
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
@@ -307,6 +315,7 @@ final class UsageAPIServer: ObservableObject {
     }
 
     init(store: UsageStore, userDefaults: UserDefaults = .standard, followSettings: Bool = true) {
+        self.store = store
         self.userDefaults = userDefaults
         router = UsageAPIRouter(
             providers: { provider in
@@ -449,15 +458,7 @@ final class UsageAPIServer: ObservableObject {
                 }
                 if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {
                     let head = String(decoding: buffer[..<range.lowerBound], as: UTF8.self)
-                    let response: UsageAPIResponse
-                    if !UsageAPIRouter.isAuthorized(head: head, peer: connection.endpoint,
-                                                    lanEnabled: self.lanEnabled, token: self.accessToken) {
-                        response = UsageAPIResponse(status: 401, body: Data("{\"error\":\"Unauthorized.\"}".utf8))
-                    } else if let request = UsageAPIRouter.parseRequestLine(head) {
-                        response = self.router.respond(method: request.method, path: request.path)
-                    } else {
-                        response = UsageAPIResponse(status: 404, body: Data("{\"error\":\"Malformed request.\"}".utf8))
-                    }
+                    let response = await self.respond(to: head, peer: connection.endpoint)
                     self.send(response, on: connection)
                 } else if isComplete || buffer.count > 16_384 {
                     connection.cancel()
@@ -466,6 +467,20 @@ final class UsageAPIServer: ObservableObject {
                 }
             }
         }
+    }
+
+    func respond(to head: String, peer: NWEndpoint) async -> UsageAPIResponse {
+        guard UsageAPIRouter.isAuthorized(head: head, peer: peer,
+                                          lanEnabled: lanEnabled, token: accessToken) else {
+            return UsageAPIResponse(status: 401, body: Data("{\"error\":\"Unauthorized.\"}".utf8))
+        }
+        guard let request = UsageAPIRouter.parseRequestLine(head) else {
+            return UsageAPIResponse(status: 404, body: Data("{\"error\":\"Malformed request.\"}".utf8))
+        }
+        if request.method == "POST", request.path.split(separator: "?", maxSplits: 1).first == "/refresh" {
+            await store.refresh()
+        }
+        return router.respond(method: request.method, path: request.path)
     }
 
     private func send(_ response: UsageAPIResponse, on connection: NWConnection) {

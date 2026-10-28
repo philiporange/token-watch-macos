@@ -99,6 +99,8 @@ final class UsageStore: ObservableObject {
     private let userDefaults: UserDefaults
 
     private var refreshLoopTask: Task<Void, Never>?
+    private var fullRefreshTask: Task<Void, Never>?
+    private var providerRefreshTasks: [ProviderKind: Task<Void, Never>] = [:]
     private var preservedFailureCounts: [ProviderKind: Int] = [:]
 
     init(
@@ -165,31 +167,44 @@ final class UsageStore: ObservableObject {
     }
 
     func refresh() async {
-        await withTaskGroup(of: Void.self) { group in
-            for provider in ProviderKind.allCases {
-                group.addTask {
-                    await self.refresh(provider)
+        if let fullRefreshTask {
+            await fullRefreshTask.value
+            return
+        }
+        let task = Task { @MainActor in
+            await withTaskGroup(of: Void.self) { group in
+                for provider in ProviderKind.allCases {
+                    group.addTask {
+                        await self.refresh(provider)
+                    }
                 }
             }
         }
+        fullRefreshTask = task
+        await task.value
+        fullRefreshTask = nil
     }
 
     func refresh(_ provider: ProviderKind) async {
-        guard !refreshingProviders.contains(provider) else { return }
-
+        if let task = providerRefreshTasks[provider] {
+            await task.value
+            return
+        }
         refreshingProviders.insert(provider)
-        defer {
+        let task = Task { @MainActor in
+            let previous = snapshot(for: provider)
+            let current = await probe(for: provider).fetch()
+            let merged = merge(previous: previous, current: current, provider: provider)
+            setSnapshot(merged, for: provider)
+
+            let now = Date.now
+            lastUpdatedByProvider[provider] = now
+            lastUpdated = now
             refreshingProviders.remove(provider)
         }
-
-        let previous = snapshot(for: provider)
-        let current = await probe(for: provider).fetch()
-        let merged = merge(previous: previous, current: current, provider: provider)
-        setSnapshot(merged, for: provider)
-
-        let now = Date.now
-        lastUpdatedByProvider[provider] = now
-        lastUpdated = now
+        providerRefreshTasks[provider] = task
+        await task.value
+        providerRefreshTasks[provider] = nil
     }
 
     func setAutoRefreshInterval(_ interval: AutoRefreshInterval) {

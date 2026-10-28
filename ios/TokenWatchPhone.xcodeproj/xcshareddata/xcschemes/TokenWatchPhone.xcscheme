@@ -53,6 +53,9 @@
                <Test
                   Identifier = "PhoneJourneyTests/testOfflineSnapshotRemainsVisible">
                </Test>
+               <Test
+                  Identifier = "PhoneJourneyTests/testAutomaticConnectionRecovery">
+               </Test>
             </SkippedTests>
          </TestableReference>
       </Testables>

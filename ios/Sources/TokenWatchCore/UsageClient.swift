@@ -38,9 +38,13 @@ public struct MacConnection: Codable, Equatable, Sendable {
     public var host: String { URL(string: address)?.host ?? address }
     public var displayName: String { host.replacingOccurrences(of: ".local", with: "").capitalized }
 
-    public func request() throws -> URLRequest {
-        guard let url = URL(string: address)?.appendingPathComponent("usage") else { throw ConnectionError.invalidAddress }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
+    public func request(refresh: Bool = false) throws -> URLRequest {
+        guard let url = URL(string: address)?.appendingPathComponent(refresh ? "refresh" : "usage") else { throw ConnectionError.invalidAddress }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: refresh ? 60 : 12)
+        if refresh {
+            request.httpMethod = "POST"
+            request.httpBody = Data()
+        }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         return request
@@ -48,8 +52,8 @@ public struct MacConnection: Codable, Equatable, Sendable {
 }
 
 public enum UsageClient {
-    public static func fetch(_ connection: MacConnection, session: URLSession = .shared) async throws -> (UsageSnapshot, Data) {
-        let (data, response) = try await session.data(for: connection.request())
+    public static func fetch(_ connection: MacConnection, refresh: Bool = false, session: URLSession = .shared) async throws -> (UsageSnapshot, Data) {
+        let (data, response) = try await session.data(for: connection.request(refresh: refresh))
         return (try decode(data, response: response), data)
     }
 
