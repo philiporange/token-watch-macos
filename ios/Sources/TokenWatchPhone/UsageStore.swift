@@ -1,0 +1,125 @@
+import Foundation
+import Security
+import SwiftUI
+import TokenWatchCore
+
+@MainActor
+final class UsageStore: ObservableObject {
+    @Published private(set) var connection: MacConnection?
+    @Published private(set) var snapshot: UsageSnapshot?
+    @Published private(set) var isRefreshing = false
+    @Published private(set) var isReachable = false
+    @Published private(set) var errorMessage: String?
+    @Published private(set) var fetchedAt: Date?
+
+    private struct CachedReading: Codable {
+        let address: String
+        let fetchedAt: Date
+        let data: Data
+    }
+
+    private let cacheURL = URL.applicationSupportDirectory.appendingPathComponent("usage.json")
+
+    init() {
+        do {
+            connection = try ConnectionKeychain.load()
+            if connection == nil,
+               let url = Bundle.main.url(forResource: "BootstrapConnection", withExtension: "plist"),
+               let data = try? Data(contentsOf: url),
+               let values = try? PropertyListDecoder().decode([String: String].self, from: data),
+               let address = values["address"], let token = values["token"] {
+                let seed = try MacConnection(address: address, token: token)
+                try ConnectionKeychain.save(seed)
+                connection = seed
+            }
+        } catch {
+            errorMessage = "Could not read the saved connection. Connect to your Mac again."
+        }
+        if let data = try? Data(contentsOf: cacheURL),
+           let cached = try? JSONDecoder().decode(CachedReading.self, from: data),
+           cached.address == connection?.address,
+           let reading = try? UsageSnapshot.decode(cached.data) {
+            snapshot = reading
+            fetchedAt = cached.fetchedAt
+        }
+    }
+
+    func refresh() async {
+        guard let requestedConnection = connection, !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            let (reading, data) = try await UsageClient.fetch(requestedConnection)
+            guard connection == requestedConnection, !Task.isCancelled else { return }
+            accept(reading, data: data, for: requestedConnection)
+        } catch {
+            guard !Task.isCancelled, connection == requestedConnection else { return }
+            isReachable = false
+            errorMessage = friendlyError(error)
+        }
+    }
+
+    func connect(address: String, token: String) async throws {
+        let candidate = try MacConnection(address: address, token: token)
+        let (reading, data) = try await UsageClient.fetch(candidate)
+        try Task.checkCancellation()
+        try ConnectionKeychain.save(candidate)
+        connection = candidate
+        accept(reading, data: data, for: candidate)
+    }
+
+    private func accept(_ reading: UsageSnapshot, data: Data, for connection: MacConnection) {
+        snapshot = reading
+        fetchedAt = .now
+        isReachable = true
+        errorMessage = nil
+        let cached = CachedReading(address: connection.address, fetchedAt: .now, data: data)
+        do {
+            try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try JSONEncoder().encode(cached).write(to: cacheURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+        } catch {
+            errorMessage = "Connected, but this reading could not be saved for offline use."
+        }
+    }
+
+    func friendlyError(_ error: Error) -> String {
+        if let error = error as? ConnectionError { return error.localizedDescription }
+        return "Can’t reach your Mac. Keep Token Watch open, enable Share with iPhone, and join the same network."
+    }
+}
+
+@MainActor
+private enum ConnectionKeychain {
+    static let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "com.philiporange.TokenWatchPhone",
+        kSecAttrAccount as String: "mac-connection",
+    ]
+
+    static func load() throws -> MacConnection? {
+        var request = query
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = item as? Data else { throw keychainError(status) }
+        return try JSONDecoder().decode(MacConnection.self, from: data)
+    }
+
+    static func save(_ connection: MacConnection) throws {
+        let attributes: [String: Any] = [
+            kSecValueData as String: try JSONEncoder().encode(connection),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        var status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw keychainError(status) }
+    }
+
+    static func keychainError(_ status: OSStatus) -> NSError {
+        NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [NSLocalizedDescriptionKey: "The connection could not be saved securely. Please try again."])
+    }
+}

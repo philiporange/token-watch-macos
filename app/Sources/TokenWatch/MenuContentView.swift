@@ -438,6 +438,7 @@ struct SettingsView: View {
     @AppStorage("showGeminiOtherModels") private var showGeminiOtherModels = false
 
     @AppStorage(UsageAPISettings.enabledKey) private var usageAPIEnabled = false
+    @AppStorage(UsageAPISettings.lanEnabledKey) private var usageAPILANEnabled = false
     @AppStorage(UsageAPISettings.portKey) private var usageAPIPort = UsageAPISettings.defaultPort
 
     @AppStorage(MenuBarVisibility.paceRevealEnabledKey) private var paceRevealEnabled = false
@@ -644,6 +645,20 @@ struct SettingsView: View {
                         .font(.system(.body, design: .monospaced))
                         .frame(width: 80)
                 }
+                Toggle("Share with iPhone", isOn: $usageAPILANEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                if usageAPILANEnabled {
+                    Text("Read-only usage on the same trusted network. Pair your iPhone with the key below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Copy pairing key") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(UsageAPISettings.accessToken(), forType: .string)
+                        }
+                        Button("Regenerate key") { UsageAPISettings.regenerateAccessToken() }
+                    }
+                }
                 if let apiServer {
                     UsageAPIStatusView(server: apiServer, loc: loc)
                 }
@@ -651,7 +666,9 @@ struct SettingsView: View {
         } header: {
             Text(loc.usageAPI)
         } footer: {
-            Text(loc.usageAPIDesc)
+            Text(usageAPIEnabled && usageAPILANEnabled
+                 ? "Read-only usage is shared on your local network. Remote requests require your pairing key."
+                 : loc.usageAPIDesc)
         }
     }
 
@@ -707,7 +724,7 @@ private struct UsageAPIStatusView: View {
     var body: some View {
         switch server.state {
         case .listening(let port):
-            Text("\(loc.usageAPIListening) http://127.0.0.1:\(String(port))/usage")
+            Text("\(loc.usageAPIListening) http://\(server.sharingOnLAN ? UsageAPISettings.lanHostname : "127.0.0.1"):\(String(port))/usage")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

@@ -25,3 +25,6 @@ Package.resolved
 
 # Build output
 dist/
+
+# Local iPhone pairing bootstrap; never commit an access key.
+ios/Resources/BootstrapConnection.plist

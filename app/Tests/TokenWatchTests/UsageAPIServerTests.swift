@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Testing
 @testable import TokenWatch
 
@@ -83,7 +84,36 @@ struct UsageAPIServerTests {
         #expect(UsageAPISettings.port(defaults) == 9_123)
     }
 
-    @Test @MainActor func listenerServesUsageOverLoopback() async throws {
+    @Test func lanAuthenticationAndLoopbackBypass() {
+        let remote = NWEndpoint.hostPort(host: "192.168.1.8", port: 8037)
+        let head = "GET /health HTTP/1.1\r\nHost: mac"
+        #expect(!UsageAPIRouter.isAuthorized(head: head, peer: remote, lanEnabled: true, token: "secret"))
+        #expect(!UsageAPIRouter.isAuthorized(head: head + "\r\nAuthorization: Bearer wrong", peer: remote, lanEnabled: true, token: "secret"))
+        #expect(UsageAPIRouter.isAuthorized(head: head + "\r\naUtHoRiZaTiOn: bEaReR secret", peer: remote, lanEnabled: true, token: "secret"))
+        #expect(!UsageAPIRouter.isAuthorized(head: head + "\r\nAuthorization: Bearer secret", peer: remote, lanEnabled: false, token: "secret"))
+        #expect(!UsageAPIRouter.isAuthorized(head: head + "\r\nAuthorization: Bearer secret", peer: remote, lanEnabled: true, token: nil))
+        #expect(!UsageAPIRouter.isAuthorized(head: head + "\r\nAuthorization: Bearer secret\r\nAuthorization: Bearer secret", peer: remote, lanEnabled: true, token: "secret"))
+        for host: NWEndpoint.Host in ["127.0.0.1", "127.0.0.2", "::1", "::ffff:127.0.0.1"] {
+            #expect(UsageAPIRouter.isAuthorized(head: head, peer: .hostPort(host: host, port: 8037), lanEnabled: true, token: nil))
+        }
+        #expect(!UsageAPIRouter.isLoopback(.hostPort(host: "::2", port: 8037)))
+    }
+
+    @Test func lanSettingsAreOptInAndTokenPersists() {
+        let name = "UsageAPILANSettingsTests"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        defer { defaults.removePersistentDomain(forName: name) }
+        #expect(!UsageAPISettings.isLANEnabled(defaults))
+        let token = UsageAPISettings.accessToken(defaults)
+        #expect(!token.isEmpty)
+        #expect(UsageAPISettings.accessToken(defaults) == token)
+        #expect(UsageAPISettings.regenerateAccessToken(defaults) != token)
+        defaults.set(true, forKey: UsageAPISettings.lanEnabledKey)
+        #expect(UsageAPISettings.isLANEnabled(defaults))
+    }
+
+    @Test(arguments: [false, true]) @MainActor func listenerServesUsageOverLoopback(lanEnabled: Bool) async throws {
         let store = UsageStore(
             claudeProbe: CountingProbe(snapshot: makeSnapshot(.claude, fiveHourUsed: 5, weeklyUsed: 6), counter: CallCounter()),
             codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: CallCounter()),
@@ -92,7 +122,7 @@ struct UsageAPIServerTests {
         await store.refresh(.claude)
         let server = UsageAPIServer(store: store, userDefaults: UserDefaults(suiteName: "UsageAPIServerListenerTests")!, followSettings: false)
         let port = Int.random(in: 20_000 ... 60_000)
-        server.start(port: port)
+        server.start(port: port, lanEnabled: lanEnabled, accessToken: lanEnabled ? "socket-test-key" : nil)
         defer { server.stop() }
 
         let ready = await waitUntil { await MainActor.run { server.state == .listening(port: port) } }

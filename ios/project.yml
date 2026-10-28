@@ -1,0 +1,92 @@
+name: TokenWatchPhone
+options:
+  bundleIdPrefix: com.philiporange
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  TokenWatchCore:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: JD42U22H4R
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+targets:
+  TokenWatchPhone:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/TokenWatchPhone
+      - path: Resources
+        buildPhase: resources
+        excludes:
+          - BootstrapConnection.plist
+    dependencies:
+      - package: TokenWatchCore
+    postBuildScripts:
+      - name: Optional local pairing
+        basedOnDependencyAnalysis: false
+        script: |
+          source="$SRCROOT/Resources/BootstrapConnection.plist"
+          destination="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/BootstrapConnection.plist"
+          if [ -f "$source" ]; then
+            cp "$source" "$destination"
+          else
+            rm -f "$destination"
+          fi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.philiporange.TokenWatchPhone
+        PRODUCT_NAME: TokenWatch
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Token Watch
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        NSLocalNetworkUsageDescription: Token Watch reads usage from your Mac on the same network. Your provider credentials stay on your Mac.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+  TokenWatchPhoneUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: TokenWatchPhone
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.philiporange.TokenWatchPhone.UITests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: TokenWatchPhone
+schemes:
+  TokenWatchPhone:
+    build:
+      targets:
+        TokenWatchPhone: all
+    run:
+      config: Debug
+    test:
+      targets:
+        - name: TokenWatchPhoneUITests
+          skippedTests:
+            - PhoneJourneyTests/testOfflineSnapshotRemainsVisible
+  TokenWatchOfflineCheck:
+    build:
+      targets:
+        TokenWatchPhone: all
+    test:
+      targets:
+        - name: TokenWatchPhoneUITests
+          skippedTests:
+            - PhoneJourneyTests/testPairedDashboardNavigationAndRelaunch

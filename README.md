@@ -48,6 +48,26 @@ Options → Local API serves the app's current readings as JSON on `127.0.0.1` (
 - `GET /usage/<provider>` returns one provider: `five_hour`, `weekly`, `model_windows`, `detail`, `pace_delta`, and `updated_at`.
 - `GET /health` returns `{"status": "ok"}`.
 
+### iPhone companion
+
+The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, and pacing. It reads the Mac app directly, refreshes every minute while open, and retains its last reading offline. Provider credentials stay on the Mac.
+
+In the Mac's **Options → Local API**, enable the API and **Share with iPhone**. In the iPhone app, tap the sliders button, enter the displayed Mac address, and paste **Copy pairing key**. Keep Token Watch running and both devices on the same trusted network. LAN sharing uses HTTP and requires the pairing key; local loopback requests keep working without it. Regenerating the key disconnects previously paired clients until their key is updated.
+
+Requires iOS 17 or later. Build and install on a connected iPhone on sandford:
+
+```bash
+cd ios
+xcodegen generate
+ios-install iphone TokenWatchPhone.xcodeproj --scheme TokenWatchPhone --allow-provisioning-updates
+```
+
+Signing uses the development team in `ios/project.yml`. The project also opens directly in Xcode. Focused client checks run with `cd ios && swift test`; API checks use `cd app && swift test --filter UsageAPIServerTests`.
+
+The `TokenWatchPhone` UI test scheme exercises a paired Mac connection on a physical iPhone. The separate `TokenWatchOfflineCheck` scheme verifies saved readings with the Mac app stopped; restart the Mac app after that check.
+
+For a personal device build, an optional, git-ignored `ios/Resources/BootstrapConnection.plist` can contain `address` and `token` strings. It pairs the app on first launch, then stores the connection in the iPhone Keychain. Omit this file from builds shared with anyone else.
+
 ## License
 
 CC0 1.0 Universal (public domain) — see [LICENSE](LICENSE). Token Watch is a from-scratch, spec-based reimplementation; it began as a fork of [AIPace](https://github.com/lbybrilee/ai-pace) (MIT), whose code survives only in this repository's history under its original license.

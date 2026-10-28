@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import SystemConfiguration
 
 // MARK: - Settings
 
@@ -7,6 +8,29 @@ enum UsageAPISettings {
     static let enabledKey = "usageAPIEnabled"
     static let portKey = "usageAPIPort"
     static let defaultPort = 8037
+    static let lanEnabledKey = "usageAPILANEnabled"
+    static let accessTokenKey = "usageAPIAccessToken"
+
+    static func isLANEnabled(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: lanEnabledKey)
+    }
+
+    static func accessToken(_ defaults: UserDefaults = .standard) -> String {
+        if let token = defaults.string(forKey: accessTokenKey), !token.isEmpty { return token }
+        return regenerateAccessToken(defaults)
+    }
+
+    @discardableResult
+    static func regenerateAccessToken(_ defaults: UserDefaults = .standard) -> String {
+        let token = UUID().uuidString + UUID().uuidString
+        defaults.set(token, forKey: accessTokenKey)
+        return token
+    }
+
+    static var lanHostname: String {
+        if let name = SCDynamicStoreCopyLocalHostName(nil) as String? { return name + ".local" }
+        return ProcessInfo.processInfo.hostName
+    }
 
     static func isEnabled(_ userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.bool(forKey: enabledKey)
@@ -131,6 +155,7 @@ struct UsageAPIResponse: Equatable {
     var statusLine: String {
         switch status {
         case 200: return "200 OK"
+        case 401: return "401 Unauthorized"
         case 404: return "404 Not Found"
         case 405: return "405 Method Not Allowed"
         default: return "500 Internal Server Error"
@@ -196,6 +221,34 @@ struct UsageAPIRouter {
         return UsageAPIResponse(status: status, body: body)
     }
 
+    /// Check the actual peer address and a single bearer header before routing any LAN request.
+    static func isAuthorized(head: String, peer: NWEndpoint, lanEnabled: Bool, token: String?) -> Bool {
+        if isLoopback(peer) { return true }
+        guard lanEnabled, let token, !token.isEmpty else { return false }
+        let headers = head.components(separatedBy: "\r\n").dropFirst().compactMap { line -> String? in
+            guard let colon = line.firstIndex(of: ":"),
+                  line[..<colon].trimmingCharacters(in: .whitespaces).lowercased() == "authorization" else { return nil }
+            return line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
+        guard headers.count == 1 else { return false }
+        let parts = headers[0].split(whereSeparator: { $0 == " " || $0 == "\t" })
+        return parts.count == 2 && parts[0].lowercased() == "bearer" && parts[1] == token
+    }
+
+    static func isLoopback(_ endpoint: NWEndpoint) -> Bool {
+        guard case .hostPort(let host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let address):
+            return address.rawValue.first == 127
+        case .ipv6(let address):
+            let bytes = Array(address.rawValue)
+            return bytes == Array(repeating: UInt8(0), count: 15) + [1]
+                || (bytes.prefix(10).allSatisfy { $0 == 0 } && bytes[10] == 255 && bytes[11] == 255 && bytes[12] == 127)
+        default:
+            return false
+        }
+    }
+
     /// Parse the request line of a minimal HTTP/1.x request head.
     static func parseRequestLine(_ head: String) -> (method: String, path: String)? {
         guard let line = head.split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: false).first else {
@@ -215,6 +268,9 @@ extension UserDefaults {
     @objc dynamic var usageAPIEnabled: Bool {
         bool(forKey: UsageAPISettings.enabledKey)
     }
+
+    @objc dynamic var usageAPILANEnabled: Bool { bool(forKey: UsageAPISettings.lanEnabledKey) }
+    @objc dynamic var usageAPIAccessToken: String? { string(forKey: UsageAPISettings.accessTokenKey) }
 
     @objc dynamic var usageAPIPort: Int {
         integer(forKey: UsageAPISettings.portKey)
@@ -238,7 +294,17 @@ final class UsageAPIServer: ObservableObject {
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private var observers: [NSKeyValueObservation] = []
-    private var appliedSettings: (enabled: Bool, port: Int)?
+    private var appliedSettings: Settings?
+    private var lanEnabled = false
+    private var accessToken: String?
+    @Published private(set) var sharingOnLAN = false
+
+    private struct Settings: Equatable {
+        let enabled: Bool
+        let port: Int
+        let lan: Bool
+        let token: String?
+    }
 
     init(store: UsageStore, userDefaults: UserDefaults = .standard, followSettings: Bool = true) {
         self.userDefaults = userDefaults
@@ -260,6 +326,12 @@ final class UsageAPIServer: ObservableObject {
                 userDefaults.observe(\.usageAPIEnabled) { [weak self] _, _ in
                     Task { @MainActor [weak self] in self?.applySettings() }
                 },
+                userDefaults.observe(\.usageAPILANEnabled) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.applySettings() }
+                },
+                userDefaults.observe(\.usageAPIAccessToken) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.applySettings() }
+                },
                 userDefaults.observe(\.usageAPIPort) { [weak self] _, _ in
                     Task { @MainActor [weak self] in self?.applySettings() }
                 },
@@ -277,26 +349,34 @@ final class UsageAPIServer: ObservableObject {
 
     /// Start, stop, or move the listener to match the current defaults.
     func applySettings() {
-        let settings = (enabled: UsageAPISettings.isEnabled(userDefaults), port: UsageAPISettings.port(userDefaults))
+        let lan = UsageAPISettings.isLANEnabled(userDefaults)
+        let settings = Settings(enabled: UsageAPISettings.isEnabled(userDefaults), port: UsageAPISettings.port(userDefaults),
+                                lan: lan, token: lan ? UsageAPISettings.accessToken(userDefaults) : nil)
         guard appliedSettings == nil || appliedSettings! != settings else { return }
         appliedSettings = settings
 
         stop()
         if settings.enabled {
-            start(port: settings.port)
+            start(port: settings.port, lanEnabled: settings.lan, accessToken: settings.token)
         }
     }
 
-    func start(port: Int) {
+    func start(port: Int, lanEnabled: Bool = false, accessToken: String? = nil) {
         stop()
+        self.lanEnabled = lanEnabled
+        self.accessToken = accessToken
+        sharingOnLAN = lanEnabled
         do {
             let parameters = NWParameters.tcp
             parameters.allowLocalEndpointReuse = true
             parameters.requiredLocalEndpoint = NWEndpoint.hostPort(
-                host: "127.0.0.1",
+                host: lanEnabled ? "::" : "127.0.0.1",
                 port: NWEndpoint.Port(rawValue: UInt16(port)) ?? .any
             )
             let listener = try NWListener(using: parameters)
+            if lanEnabled {
+                listener.service = NWListener.Service(name: "Token Watch", type: "_tokenwatch._tcp")
+            }
             listener.stateUpdateHandler = { [weak self] newState in
                 Task { @MainActor [weak self] in
                     guard let self, self.listener === listener else { return }
@@ -334,6 +414,7 @@ final class UsageAPIServer: ObservableObject {
         }
         connections.removeAll()
         state = .stopped
+        sharingOnLAN = false
     }
 
     private func accept(_ connection: NWConnection) {
@@ -362,10 +443,17 @@ final class UsageAPIServer: ObservableObject {
                     connection.cancel()
                     return
                 }
+                guard buffer.count <= 16_384 else {
+                    connection.cancel()
+                    return
+                }
                 if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {
                     let head = String(decoding: buffer[..<range.lowerBound], as: UTF8.self)
                     let response: UsageAPIResponse
-                    if let request = UsageAPIRouter.parseRequestLine(head) {
+                    if !UsageAPIRouter.isAuthorized(head: head, peer: connection.endpoint,
+                                                    lanEnabled: self.lanEnabled, token: self.accessToken) {
+                        response = UsageAPIResponse(status: 401, body: Data("{\"error\":\"Unauthorized.\"}".utf8))
+                    } else if let request = UsageAPIRouter.parseRequestLine(head) {
                         response = self.router.respond(method: request.method, path: request.path)
                     } else {
                         response = UsageAPIResponse(status: 404, body: Data("{\"error\":\"Malformed request.\"}".utf8))
