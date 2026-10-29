@@ -933,3 +933,174 @@ struct Loc {
         }
     }
 }
+
+extension Loc {
+    var bankedResets: String {
+        switch lang {
+        case .english: return "Banked resets"
+        case .spanish: return "Reinicios guardados"
+        case .french: return "Réinitialisations en réserve"
+        case .german: return "Gespeicherte Zurücksetzungen"
+        case .japanese: return "保存されたリセット"
+        case .korean: return "저장된 초기화"
+        case .chineseSimplified: return "已保存的重置"
+        }
+    }
+
+    var applyBankedReset: String {
+        switch lang {
+        case .english: return "Apply"
+        case .spanish: return "Aplicar"
+        case .french: return "Appliquer"
+        case .german: return "Anwenden"
+        case .japanese: return "適用"
+        case .korean: return "적용"
+        case .chineseSimplified: return "应用"
+        }
+    }
+
+    var applyResetButton: String {
+        switch lang {
+        case .english: return "Apply Reset"
+        case .spanish: return "Aplicar reinicio"
+        case .french: return "Appliquer la réinitialisation"
+        case .german: return "Zurücksetzung anwenden"
+        case .japanese: return "リセットを適用"
+        case .korean: return "초기화 적용"
+        case .chineseSimplified: return "应用重置"
+        }
+    }
+
+    var bankedResetCancel: String {
+        switch lang {
+        case .english: return "Cancel"
+        case .spanish: return "Cancelar"
+        case .french: return "Annuler"
+        case .german: return "Abbrechen"
+        case .japanese: return "キャンセル"
+        case .korean: return "취소"
+        case .chineseSimplified: return "取消"
+        }
+    }
+
+    var bankedResetQuestion: String {
+        switch lang {
+        case .english: return "Apply %@ reset?"
+        case .spanish: return "¿Aplicar el reinicio de %@?"
+        case .french: return "Appliquer la réinitialisation %@ ?"
+        case .german: return "%@ zurücksetzen?"
+        case .japanese: return "%@のリセットを適用しますか？"
+        case .korean: return "%@ 초기화를 적용할까요?"
+        case .chineseSimplified: return "应用 %@ 重置？"
+        }
+    }
+
+    var bankedResetConfirmation: String {
+        switch lang {
+        case .english: return "%@ (%@). This resets the current usage windows now and cannot be undone."
+        case .spanish: return "%@ (%@). Reinicia ahora los períodos de uso actuales y no se puede deshacer."
+        case .french: return "%@ (%@). Les fenêtres d’utilisation actuelles seront réinitialisées immédiatement. Cette action est irréversible."
+        case .german: return "%@ (%@). Die aktuellen Nutzungsfenster werden sofort zurückgesetzt. Dies kann nicht rückgängig gemacht werden."
+        case .japanese: return "%@（%@）。現在の使用期間を今すぐリセットします。この操作は取り消せません。"
+        case .korean: return "%@ (%@). 현재 사용 기간을 지금 초기화하며 되돌릴 수 없습니다."
+        case .chineseSimplified: return "%@（%@）。将立即重置当前用量周期，且无法撤销。"
+        }
+    }
+
+    var bankedResetExpired: String {
+        switch lang {
+        case .english: return "Expired"
+        case .spanish: return "Caducado"
+        case .french: return "Expiré"
+        case .german: return "Abgelaufen"
+        case .japanese: return "期限切れ"
+        case .korean: return "만료됨"
+        case .chineseSimplified: return "已过期"
+        }
+    }
+
+    var bankedResetNoExpiry: String {
+        switch lang {
+        case .english: return "No expiry"
+        case .spanish: return "Sin caducidad"
+        case .french: return "Sans expiration"
+        case .german: return "Kein Ablaufdatum"
+        case .japanese: return "有効期限なし"
+        case .korean: return "만료 없음"
+        case .chineseSimplified: return "无到期时间"
+        }
+    }
+
+    var bankedResetExpiresIn: String {
+        switch lang {
+        case .english: return "Expires in %@"
+        case .spanish: return "Caduca en %@"
+        case .french: return "Expire dans %@"
+        case .german: return "Läuft in %@ ab"
+        case .japanese: return "あと%@で期限切れ"
+        case .korean: return "%@ 후 만료"
+        case .chineseSimplified: return "%@后到期"
+        }
+    }
+
+    var bankedResetAutoEnable: String {
+        switch lang {
+        case .english: return "Apply banked resets automatically before they expire"
+        case .spanish: return "Aplicar los reinicios guardados automáticamente antes de que caduquen"
+        case .french: return "Appliquer automatiquement les réinitialisations en réserve avant leur expiration"
+        case .german: return "Gespeicherte Zurücksetzungen vor Ablauf automatisch anwenden"
+        case .japanese: return "期限切れ前に保存されたリセットを自動適用"
+        case .korean: return "저장된 초기화를 만료 전에 자동 적용"
+        case .chineseSimplified: return "在到期前自动应用已保存的重置"
+        }
+    }
+
+    var bankedResetLead: String {
+        switch lang {
+        case .english: return "Minutes before expiry: %d"
+        case .spanish: return "Minutos antes de caducar: %d"
+        case .french: return "Minutes avant expiration : %d"
+        case .german: return "Minuten vor Ablauf: %d"
+        case .japanese: return "有効期限の何分前：%d"
+        case .korean: return "만료 전 시간(분): %d"
+        case .chineseSimplified: return "到期前分钟数：%d"
+        }
+    }
+
+    var bankedResetAutoDescription: String {
+        switch lang {
+        case .english: return "Runs while Token Watch is open, only for Claude/Codex resets that would otherwise expire unused."
+        case .spanish: return "Funciona mientras Token Watch está abierto, solo para reinicios de Claude/Codex que caducarían sin usar."
+        case .french: return "Fonctionne lorsque Token Watch est ouvert, uniquement pour les réinitialisations Claude/Codex qui expireraient sans être utilisées."
+        case .german: return "Läuft bei geöffnetem Token Watch, nur für Claude/Codex-Zurücksetzungen, die sonst ungenutzt ablaufen würden."
+        case .japanese: return "Token Watchの起動中、未使用のまま期限切れになるClaude/Codexのリセットのみを適用します。"
+        case .korean: return "Token Watch가 열려 있는 동안 미사용 상태로 만료될 Claude/Codex 초기화에만 적용됩니다."
+        case .chineseSimplified: return "仅在 Token Watch 打开时运行，只应用即将到期且未使用的 Claude/Codex 重置。"
+        }
+    }
+
+    func bankedResetExpiry(_ reset: BankedReset, now: Date = .now) -> String {
+        guard let date = reset.expiresAt else { return bankedResetNoExpiry }
+        let seconds = date.timeIntervalSince(now)
+        guard seconds > 0 else { return bankedResetExpired }
+        if seconds < 86400 {
+            let minutes = max(1, Int(seconds / 60))
+            return String(format: bankedResetExpiresIn, "\(minutes / 60)h \(minutes % 60)m")
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().hour().minute().locale(Locale(identifier: lang.rawValue)))
+    }
+
+    func bankedResetStatus(_ status: String) -> String {
+        let labels: [String: [String]] = [
+            "available": ["Available", "Disponible", "Disponible", "Verfügbar", "利用可能", "사용 가능", "可用"],
+            "redeeming": ["Applying", "Aplicando", "Application", "Wird angewendet", "適用中", "적용 중", "应用中"],
+            "redeemed": ["Applied", "Aplicado", "Appliqué", "Angewendet", "適用済み", "적용됨", "已应用"],
+            "paused": ["Paused", "En pausa", "En pause", "Pausiert", "一時停止", "일시 중지", "已暂停"],
+            "unavailable": ["Unavailable", "No disponible", "Indisponible", "Nicht verfügbar", "利用不可", "사용 불가", "不可用"],
+            "unknown": ["Unknown", "Desconocido", "Inconnu", "Unbekannt", "不明", "알 수 없음", "未知"]
+        ]
+        if status == "expired" { return bankedResetExpired }
+        let index = AppLanguage.allCases.firstIndex(of: lang) ?? 0
+        return (labels[status] ?? labels["unknown"]!)[index]
+    }
+}

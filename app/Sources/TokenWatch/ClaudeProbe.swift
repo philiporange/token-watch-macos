@@ -40,34 +40,7 @@ struct ClaudeProbe: @unchecked Sendable {
     func fetch() async -> ProviderSnapshot {
         do {
             let accountInfo = accountInfoResolver.resolve()
-            let resolution = credentialLoader.resolveCredentials()
-
-            guard var credentials = resolution.credentials else {
-                if let issue = resolution.issue {
-                    throw ProcessRunnerError.invalidResponse(issue.message)
-                }
-
-                let status: ClaudeAuthStatus
-                do {
-                    status = try await apiClient.fetchStatus()
-                } catch {
-                    throw ProcessRunnerError.invalidResponse(Self.credentialsNotFoundMessage)
-                }
-
-                if status.loggedIn == true {
-                    throw ProcessRunnerError.invalidResponse(Self.loggedInWithoutCredentialsMessage)
-                }
-
-                throw ProcessRunnerError.invalidResponse(Self.credentialsNotFoundMessage)
-            }
-
-            if credentialLoader.needsRefresh(credentials.oauth), credentials.source != .environment {
-                guard Self.hasRefreshToken(credentials) else {
-                    throw ProcessRunnerError.invalidResponse(Self.sessionExpiredMessage)
-                }
-
-                credentials = try await apiClient.refreshToken(credentials, credentialLoader)
-            }
+            var credentials = try await loadCredentials()
 
             let usage: ClaudeUsageResponse
             do {
@@ -92,6 +65,46 @@ struct ClaudeProbe: @unchecked Sendable {
         } catch {
             return errorSnapshot(for: error)
         }
+    }
+
+    func loadCredentials() async throws -> ClaudeCredentialResult {
+        let resolution = credentialLoader.resolveCredentials()
+
+        guard var credentials = resolution.credentials else {
+            if let issue = resolution.issue {
+                throw ProcessRunnerError.invalidResponse(issue.message)
+            }
+
+            let status: ClaudeAuthStatus
+            do {
+                status = try await apiClient.fetchStatus()
+            } catch {
+                throw ProcessRunnerError.invalidResponse(Self.credentialsNotFoundMessage)
+            }
+
+            if status.loggedIn == true {
+                throw ProcessRunnerError.invalidResponse(Self.loggedInWithoutCredentialsMessage)
+            }
+
+            throw ProcessRunnerError.invalidResponse(Self.credentialsNotFoundMessage)
+        }
+
+        if credentialLoader.needsRefresh(credentials.oauth), credentials.source != .environment {
+            guard Self.hasRefreshToken(credentials) else {
+                throw ProcessRunnerError.invalidResponse(Self.sessionExpiredMessage)
+            }
+
+            credentials = try await apiClient.refreshToken(credentials, credentialLoader)
+        }
+
+        return credentials
+    }
+
+    func refreshCredentialsAfterAuthFailure(_ credentials: ClaudeCredentialResult) async throws -> ClaudeCredentialResult {
+        guard credentials.source != .environment, Self.hasRefreshToken(credentials) else {
+            throw ProcessRunnerError.invalidResponse(Self.authenticationFailedMessage)
+        }
+        return try await apiClient.refreshToken(credentials, credentialLoader)
     }
 
     func parseISODate(_ isoString: String?) -> Date? {
@@ -227,7 +240,7 @@ struct ClaudeProbe: @unchecked Sendable {
     }
 
     static func liveFetchUsage(with accessToken: String) async throws -> ClaudeUsageResponse {
-        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+        guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1") else {
             throw ProcessRunnerError.invalidResponse("Claude usage request failed: Invalid URL.")
         }
 
@@ -358,7 +371,8 @@ struct ClaudeProbe: @unchecked Sendable {
             fiveHour: fiveHour,
             weekly: weekly,
             modelWindows: modelWindows,
-            detail: detailText(from: credentials, accountInfo: accountInfo)
+            detail: detailText(from: credentials, accountInfo: accountInfo),
+            bankedResets: response.cedarEmber?.bankedResets() ?? []
         )
     }
 
@@ -392,6 +406,7 @@ struct ClaudeUsageResponse: Decodable, Sendable {
     let fiveHour: ClaudeQuotaData?
     let sevenDay: ClaudeQuotaData?
     let limits: [ClaudeLimit]
+    var cedarEmber: ClaudeCedarEmber? = nil
 
     init(fiveHour: ClaudeQuotaData?, sevenDay: ClaudeQuotaData?, limits: [ClaudeLimit] = []) {
         self.fiveHour = fiveHour
@@ -438,6 +453,7 @@ struct ClaudeUsageResponse: Decodable, Sendable {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
         case limits
+        case cedarEmber = "cedar_ember"
     }
 
     init(from decoder: Decoder) throws {
@@ -445,6 +461,7 @@ struct ClaudeUsageResponse: Decodable, Sendable {
         fiveHour = try container.decodeIfPresent(ClaudeQuotaData.self, forKey: .fiveHour)
         sevenDay = try container.decodeIfPresent(ClaudeQuotaData.self, forKey: .sevenDay)
         limits = (try? container.decode([ClaudeLimit].self, forKey: .limits)) ?? []
+        cedarEmber = try? container.decode(ClaudeCedarEmber.self, forKey: .cedarEmber)
     }
 }
 
@@ -532,4 +549,156 @@ struct ClaudeRefreshResponse: Decodable, Sendable {
 
 struct ClaudeRefreshErrorResponse: Decodable, Sendable {
     let error: String?
+}
+
+struct ClaudeCedarEmber: Decodable, Sendable {
+    let eligible: Bool
+    let ineligibleReason: String?
+    let nextGrantID: String?
+    let cooldownUntil: String?
+    let grants: [LossyGrant]
+
+    enum CodingKeys: String, CodingKey {
+        case eligible, grants
+        case ineligibleReason = "ineligible_reason", nextGrantID = "next_grant_id", cooldownUntil = "cooldown_until"
+    }
+
+    struct LossyGrant: Decodable, Sendable {
+        let value: Grant?
+        init(from decoder: Decoder) throws { value = try? Grant(from: decoder) }
+    }
+
+    struct Grant: Decodable, Sendable {
+        let id: String
+        let label: String?
+        let resetsLeft: Int
+        let startsAt: String?
+        let endsAt: String?
+        let clears: [String]?
+        let paused: Bool
+        let usableNow: Bool
+        let useRequiresLimit: Bool?
+        enum CodingKeys: String, CodingKey {
+            case id, label, clears, paused
+            case resetsLeft = "resets_left", startsAt = "starts_at", endsAt = "ends_at"
+            case usableNow = "usable_now", useRequiresLimit = "use_requires_limit"
+        }
+    }
+
+    func bankedResets(now: Date = .now) -> [BankedReset] {
+        let parse = { (s: String?) in ClaudeProbe().parseISODate(s) }
+        let cooldown = parse(cooldownUntil).map { $0 > now } ?? false
+        return grants.compactMap { item in
+            guard let g = item.value, BankedReset.validID(g.id), g.resetsLeft >= 0 else { return nil }
+            let expiry = parse(g.endsAt)
+            let expired = expiry.map { $0 <= now } ?? false
+            let usable = eligible && g.id == nextGrantID && g.usableNow && !g.paused && !expired && !cooldown && g.resetsLeft > 0
+            let status = expired ? "expired" : g.resetsLeft == 0 ? "redeemed" : g.paused ? "paused" : usable ? "available" : "unavailable"
+            var note: String?
+            if !usable && !expired && g.resetsLeft > 0 {
+                if !eligible && ineligibleReason == "surface" {
+                    note = "Claude only allows this reset on claude.ai or Claude Desktop."
+                } else if !eligible {
+                    note = "Claude reports this reset is unavailable (\(ineligibleReason ?? "ineligible"))."
+                } else if cooldown {
+                    note = "Claude allows another reset after \(parse(cooldownUntil)!.ISO8601Format())."
+                } else if !g.usableNow && g.useRequiresLimit == true {
+                    note = "Claude allows this reset once you reach a limit."
+                }
+            }
+            let names = ["five_hour": "5h", "seven_day": "weekly", "seven_day_opus": "Opus weekly", "seven_day_sonnet": "Sonnet weekly"]
+            let clears = (g.clears ?? []).map { names[$0] ?? $0 }
+            let label = g.label?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return BankedReset(id: g.id, title: label.flatMap { $0.isEmpty ? nil : $0 } ?? "Claude limit reset",
+                detail: clears.isEmpty ? nil : "Refills " + clears.joined(separator: " and ") + " limits",
+                grantedAt: parse(g.startsAt), expiresAt: expiry, status: status, usable: usable, remaining: g.resetsLeft, note: note)
+        }
+    }
+}
+
+protocol ClaudeResetTransport: Sendable {
+    func send(_ request: URLRequest) async throws -> (Data, Int)
+}
+
+struct ClaudeLiveResetTransport: ClaudeResetTransport {
+    func send(_ request: URLRequest) async throws -> (Data, Int) {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProcessRunnerError.invalidResponse("Invalid response.")
+        }
+        return (data, http.statusCode)
+    }
+}
+
+struct ClaudeBankedResetApplier: BankedResetApplying {
+    let probe: ClaudeProbe
+    let transport: any ClaudeResetTransport
+
+    func apply(id: String, idempotencyKey: String) async -> BankedResetUpstreamResult {
+        guard BankedReset.validID(id), idempotencyKey.count <= 64, BankedReset.validID(idempotencyKey) else {
+            return .init(outcome: .error, detail: "Invalid reset identifier or request key.")
+        }
+        do {
+            var credentials = try await probe.loadCredentials()
+            for attempt in 0...1 {
+                let result = await attemptReset(token: credentials.oauth.accessToken, id: id, key: idempotencyKey)
+                if result.authenticationFailed && attempt == 0 {
+                    do { credentials = try await probe.refreshCredentialsAfterAuthFailure(credentials) }
+                    catch { return .init(outcome: .error, detail: "Claude authentication failed.") }
+                    continue
+                }
+                return result.result
+            }
+        } catch {
+            return .init(outcome: .error, detail: error.localizedDescription)
+        }
+        return .init(outcome: .error, detail: "Claude authentication failed.")
+    }
+
+    private func attemptReset(token: String, id: String, key: String) async -> (result: BankedResetUpstreamResult, authenticationFailed: Bool) {
+        var sent = false
+        do {
+            func request(_ path: String, method: String = "GET") -> URLRequest {
+                var r = URLRequest(url: URL(string: "https://api.anthropic.com" + path)!)
+                r.httpMethod = method
+                r.timeoutInterval = 30
+                r.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+                r.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+                r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                r.setValue("application/json", forHTTPHeaderField: "Accept")
+                return r
+            }
+            let (profile, profileStatus) = try await transport.send(request("/api/oauth/profile"))
+            guard (200..<300).contains(profileStatus) else { return Self.httpFailure(profileStatus) }
+            let json = try JSONSerialization.jsonObject(with: profile) as? [String: Any]
+            guard let org = (json?["organization"] as? [String: Any])?["uuid"] as? String, BankedReset.validID(org) else {
+                return (.init(outcome: .error, detail: "Invalid organization identifier."), false)
+            }
+            var post = request("/api/organizations/\(org)/reset_rate_limits", method: "POST")
+            post.httpBody = try JSONSerialization.data(withJSONObject: ["program": "cedar_ember", "grant_id": id, "request_id": key])
+            sent = true
+            let (data, status) = try await transport.send(post)
+            guard (200..<300).contains(status) else { return Self.httpFailure(status) }
+            let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let outcome: BankedResetOutcome
+            switch response?["result"] as? String {
+            case "reset": outcome = .reset
+            case "already_used": outcome = .alreadyRedeemed
+            case "not_limited": outcome = .nothingToReset
+            case "cooldown": outcome = .cooldown
+            case "ineligible": outcome = .ineligible
+            default: outcome = .unavailable
+            }
+            return (.init(outcome: outcome, detail: response?["reason"] as? String), false)
+        } catch {
+            return (.init(outcome: sent ? .unconfirmed : .error, detail: error.localizedDescription), false)
+        }
+    }
+
+    private static func httpFailure(_ status: Int) -> (result: BankedResetUpstreamResult, authenticationFailed: Bool) {
+        if status == 401 || status == 403 {
+            return (.init(outcome: .error, detail: "Claude authentication failed."), true)
+        }
+        return (.init(outcome: status == 429 ? .rateLimited : .error, detail: "HTTP \(status)."), false)
+    }
 }

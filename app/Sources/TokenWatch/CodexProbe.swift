@@ -53,81 +53,8 @@ struct CodexProbe: Sendable {
 
     private func fetchSync(cancellation: CodexRequestCancellation) -> ProviderSnapshot {
         do {
-            try cancellation.check()
-            let directories = ProcessRunner.pathDirectories()
-            guard let codexPath = executablePath ?? ProcessRunner.which("codex", directories: directories) else {
-                throw ProcessRunnerError.executableNotFound("codex")
-            }
-
-            let process = Process()
-            let stdinPipe = Pipe()
-            let stdoutPipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: codexPath)
-            process.arguments = ["-s", "read-only", "app-server"]
-            process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.homeDirectoryForCurrentUser.path)
-            process.environment = ProcessRunner.environment(
-                base: ProcessInfo.processInfo.environment,
-                pathDirectories: directories
-            )
-            process.standardInput = stdinPipe
-            process.standardOutput = stdoutPipe
-            process.standardError = FileHandle.nullDevice
-
-            try process.run()
-
-            defer {
-                try? stdinPipe.fileHandleForWriting.close()
-                try? stdoutPipe.fileHandleForReading.close()
-                if process.isRunning {
-                    process.terminate()
-                    let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
-                    while process.isRunning && ContinuousClock.now < deadline {
-                        Thread.sleep(forTimeInterval: 0.01)
-                    }
-                    if process.isRunning {
-                        kill(process.processIdentifier, SIGKILL)
-                    }
-                }
-            }
-
-            let stdinHandle = stdinPipe.fileHandleForWriting
-            var reader = CodexResponseReader(
-                handle: stdoutPipe.fileHandleForReading,
-                deadline: ContinuousClock.now.advanced(by: .seconds(max(0, timeout))),
-                cancellation: cancellation
-            )
-
-            let initRequest: [String: Any] = [
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": [
-                    "clientInfo": [
-                        "name": "tokenwatch",
-                        "version": "0.1.0"
-                    ]
-                ]
-            ]
-            try writeJSONLine(initRequest, to: stdinHandle)
-            _ = try reader.readResponse(withID: 1)
-
-            let initializedNotification: [String: Any] = [
-                "jsonrpc": "2.0",
-                "method": "initialized",
-                "params": [:]
-            ]
-            try writeJSONLine(initializedNotification, to: stdinHandle)
-
-            let rateLimitsRequest: [String: Any] = [
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "account/rateLimits/read",
-                "params": [:]
-            ]
-            try writeJSONLine(rateLimitsRequest, to: stdinHandle)
-            let response2 = try reader.readResponse(withID: 2)
-
+            let response2 = try codexRequestSync(executablePath: executablePath, timeout: timeout,
+                                                 method: "account/rateLimits/read", params: [:], cancellation: cancellation)
             guard let result = response2["result"] as? [String: Any],
                   let rateLimits = result["rateLimits"] as? [String: Any] else {
                 throw ProcessRunnerError.invalidResponse("Codex rate limit response was missing result.rateLimits.")
@@ -180,7 +107,8 @@ struct CodexProbe: Sendable {
                 fiveHour: fiveHourWindow,
                 weekly: weeklyWindow,
                 modelWindows: [],
-                detail: detail
+                detail: detail,
+                bankedResets: Self.parseBankedResets(result["rateLimitResetCredits"])
             )
         } catch {
             let msg = error.localizedDescription
@@ -244,7 +172,7 @@ private struct CodexResponseReader {
         while true {
             try cancellation.check()
             guard ContinuousClock.now < deadline else {
-                throw ProcessRunnerError.invalidResponse("Codex app-server timed out. Try refreshing again.")
+                throw CodexReadInterruption(detail: "Codex app-server timed out. Try refreshing again.")
             }
 
             if let newline = buffer.firstIndex(of: 0x0A) {
@@ -271,7 +199,7 @@ private struct CodexResponseReader {
                 throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
             }
             guard count > 0 else {
-                throw ProcessRunnerError.invalidResponse("Codex app-server closed before returning response id \(id).")
+                throw CodexReadInterruption(detail: "Codex app-server closed before returning response id \(id).")
             }
             buffer.append(contentsOf: bytes.prefix(count))
         }
@@ -420,4 +348,155 @@ func integerValue(_ value: Any?) -> Int? {
         return Int(string.trimmingCharacters(in: .whitespacesAndNewlines))
     }
     return nil
+}
+
+private struct CodexReadInterruption: LocalizedError {
+    let detail: String
+    var errorDescription: String? { detail }
+}
+
+struct CodexConsumeFailure: LocalizedError {
+    let requestWritten: Bool
+    let detail: String
+    var errorDescription: String? { detail }
+}
+
+private func codexRequestSync(executablePath: String?, timeout: TimeInterval, method: String,
+                              params: [String: String], cancellation: CodexRequestCancellation) throws -> [String: Any] {
+    try cancellation.check()
+    let directories = ProcessRunner.pathDirectories()
+    guard let codexPath = executablePath ?? ProcessRunner.which("codex", directories: directories) else {
+        throw ProcessRunnerError.executableNotFound("codex")
+    }
+
+    let process = Process()
+    let stdinPipe = Pipe()
+    let stdoutPipe = Pipe()
+
+    process.executableURL = URL(fileURLWithPath: codexPath)
+    process.arguments = ["-s", "read-only", "app-server"]
+    process.currentDirectoryURL = URL(fileURLWithPath: FileManager.default.homeDirectoryForCurrentUser.path)
+    process.environment = ProcessRunner.environment(
+        base: ProcessInfo.processInfo.environment,
+        pathDirectories: directories
+    )
+    process.standardInput = stdinPipe
+    process.standardOutput = stdoutPipe
+    process.standardError = FileHandle.nullDevice
+
+    try process.run()
+
+    defer {
+        try? stdinPipe.fileHandleForWriting.close()
+        try? stdoutPipe.fileHandleForReading.close()
+        if process.isRunning {
+            process.terminate()
+            let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
+            while process.isRunning && ContinuousClock.now < deadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+            }
+        }
+    }
+
+    let stdinHandle = stdinPipe.fileHandleForWriting
+    var reader = CodexResponseReader(
+        handle: stdoutPipe.fileHandleForReading,
+        deadline: ContinuousClock.now.advanced(by: .seconds(max(0, timeout))),
+        cancellation: cancellation
+    )
+
+    let initRequest: [String: Any] = [
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": [
+            "clientInfo": [
+                "name": "tokenwatch",
+                "version": "0.1.0"
+            ]
+        ]
+    ]
+    try writeJSONLine(initRequest, to: stdinHandle)
+    _ = try reader.readResponse(withID: 1)
+
+    let initializedNotification: [String: Any] = [
+        "jsonrpc": "2.0",
+        "method": "initialized",
+        "params": [:]
+    ]
+    try writeJSONLine(initializedNotification, to: stdinHandle)
+
+    let request: [String: Any] = [
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": method,
+        "params": params
+    ]
+    try writeJSONLine(request, to: stdinHandle)
+    do {
+        return try reader.readResponse(withID: 2)
+    } catch let error as CodexReadInterruption {
+        throw CodexConsumeFailure(requestWritten: true, detail: error.localizedDescription)
+    }
+}
+
+protocol CodexResetTransport: Sendable {
+    func consume(id: String, idempotencyKey: String) async throws -> Data
+}
+
+struct CodexLiveResetTransport: CodexResetTransport {
+    func consume(id: String, idempotencyKey: String) async throws -> Data {
+        try await Task.detached(priority: .utility) {
+            let response = try codexRequestSync(executablePath: nil, timeout: 30,
+                method: "account/rateLimitResetCredit/consume",
+                params: ["creditId": id, "idempotencyKey": idempotencyKey], cancellation: CodexRequestCancellation())
+            return try JSONSerialization.data(withJSONObject: response)
+        }.value
+    }
+}
+
+struct CodexBankedResetApplier: BankedResetApplying {
+    let transport: any CodexResetTransport
+
+    func apply(id: String, idempotencyKey: String) async -> BankedResetUpstreamResult {
+        do {
+            let data = try await transport.consume(id: id, idempotencyKey: idempotencyKey)
+            let response = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            if let error = response?["error"] {
+                return .init(outcome: .error, detail: String(describing: error))
+            }
+            let result = response?["result"] as? [String: Any]
+            switch result?["outcome"] as? String {
+            case "reset": return .init(outcome: .reset)
+            case "nothingToReset": return .init(outcome: .nothingToReset)
+            case "noCredit": return .init(outcome: .noCredit)
+            case "alreadyRedeemed": return .init(outcome: .alreadyRedeemed)
+            default: return .init(outcome: .error, detail: "Invalid consume response.")
+            }
+        } catch let error as CodexConsumeFailure {
+            return .init(outcome: error.requestWritten ? .unconfirmed : .error, detail: error.detail)
+        } catch {
+            return .init(outcome: .error, detail: error.localizedDescription)
+        }
+    }
+}
+
+extension CodexProbe {
+    static func parseBankedResets(_ value: Any?, now: Date = .now) -> [BankedReset] {
+        guard let block = value as? [String: Any], let credits = block["credits"] as? [[String: Any]] else { return [] }
+        return credits.compactMap { credit in
+            guard let id = credit["id"] as? String, BankedReset.validID(id) else { return nil }
+            let expiry = TokenWatch_numericValue(credit["expiresAt"]).map(Date.init(timeIntervalSince1970:))
+            let raw = credit["status"] as? String ?? "unknown"
+            let status = expiry.map { $0 <= now } == true ? "expired" :
+                (["available", "redeeming", "redeemed"].contains(raw) ? raw : "unknown")
+            return BankedReset(id: id, title: credit["title"] as? String ?? "Codex reset",
+                detail: credit["description"] as? String,
+                grantedAt: TokenWatch_numericValue(credit["grantedAt"]).map(Date.init(timeIntervalSince1970:)),
+                expiresAt: expiry, status: status, usable: status == "available", remaining: status == "available" ? 1 : 0)
+        }
+    }
 }

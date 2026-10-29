@@ -51,7 +51,7 @@ struct UsageAPIServerTests {
         let bulk = router.respond(method: "GET", path: "/usage?x=1")
         #expect(bulk.status == 200)
         let all = try json(bulk)
-        #expect(Set(all.keys) == Set(ProviderKind.allCases.map(\.routeKey) + ["last_updated"]))
+        #expect(Set(all.keys) == Set(ProviderKind.allCases.map(\.routeKey) + ["last_updated", "banked_reset_auto_apply"]))
         let claude = try #require(all["claude"] as? [String: Any])
         #expect(claude["provider"] as? String == "Claude")
         #expect((claude["five_hour"] as? [String: Any])?["used_percentage"] as? Double == 12.5)

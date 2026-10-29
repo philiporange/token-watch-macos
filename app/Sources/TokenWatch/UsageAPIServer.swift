@@ -85,6 +85,7 @@ struct UsageAPIProviderPayload: Encodable, Equatable {
     let detail: String?
     let paceDelta: Double?
     let updatedAt: Date?
+    let bankedResets: [BankedReset]
 
     enum CodingKeys: String, CodingKey {
         case provider
@@ -94,6 +95,7 @@ struct UsageAPIProviderPayload: Encodable, Equatable {
         case detail
         case paceDelta = "pace_delta"
         case updatedAt = "updated_at"
+        case bankedResets = "banked_resets"
     }
 
     init(snapshot: ProviderSnapshot, updatedAt: Date?, now: Date = .now) {
@@ -106,20 +108,24 @@ struct UsageAPIProviderPayload: Encodable, Equatable {
         detail = snapshot.detail
         paceDelta = UsagePacing.delta(for: snapshot.pacingWindow, now: now)
         self.updatedAt = updatedAt
+        bankedResets = snapshot.bankedResets
     }
 }
 
 struct UsageAPIBulkPayload: Encodable {
     let providers: [String: UsageAPIProviderPayload]
     let lastUpdated: Date?
+    var bankedResetAutoApply: UsageAPIAutoApplyPayload = .init(enabled: false, leadMinutes: 5)
 
     enum CodingKeys: String, CodingKey {
         case lastUpdated = "last_updated"
+        case bankedResetAutoApply = "banked_reset_auto_apply"
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(lastUpdated, forKey: .lastUpdated)
+        try container.encode(bankedResetAutoApply, forKey: .bankedResetAutoApply)
         var dynamic = encoder.container(keyedBy: DynamicKey.self)
         for (key, payload) in providers {
             try dynamic.encode(payload, forKey: DynamicKey(key))
@@ -133,6 +139,39 @@ struct UsageAPIBulkPayload: Encodable {
         init?(stringValue: String) { self.stringValue = stringValue }
         init?(intValue: Int) { nil }
     }
+}
+
+struct UsageAPIAutoApplyPayload: Encodable {
+    let enabled: Bool
+    let leadMinutes: Int
+    enum CodingKeys: String, CodingKey { case enabled, leadMinutes = "lead_minutes" }
+}
+
+struct UsageAPIBankedResetPayload: Encodable {
+    let provider: String
+    let reset: BankedReset
+    enum CodingKeys: String, CodingKey { case provider }
+    func encode(to encoder: Encoder) throws {
+        try reset.encode(to: encoder)
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(provider, forKey: .provider)
+    }
+}
+
+struct UsageAPIResetsPayload: Encodable {
+    let autoApply: UsageAPIAutoApplyPayload
+    let resets: [UsageAPIBankedResetPayload]
+    enum CodingKeys: String, CodingKey { case autoApply = "auto_apply", resets }
+}
+
+struct UsageAPIResetApplyPayload: Encodable {
+    let provider: String
+    let resetID: String
+    let outcome: String
+    let applied: Bool
+    let message: String
+    let usage: UsageAPIProviderPayload
+    enum CodingKeys: String, CodingKey { case provider, resetID = "reset_id", outcome, applied, message, usage }
 }
 
 extension ProviderKind {
@@ -158,6 +197,8 @@ struct UsageAPIResponse: Equatable {
         case 401: return "401 Unauthorized"
         case 404: return "404 Not Found"
         case 405: return "405 Method Not Allowed"
+        case 409: return "409 Conflict"
+        case 502: return "502 Bad Gateway"
         default: return "500 Internal Server Error"
         }
     }
@@ -177,6 +218,7 @@ struct UsageAPIResponse: Equatable {
 struct UsageAPIRouter {
     let providers: (ProviderKind) -> UsageAPIProviderPayload
     let lastUpdated: () -> Date?
+    var autoApply: () -> UsageAPIAutoApplyPayload = { .init(enabled: false, leadMinutes: 5) }
 
     static let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -185,9 +227,26 @@ struct UsageAPIRouter {
         return encoder
     }()
 
-    func respond(method: String, path: String) -> UsageAPIResponse {
+    static func applyRoute(_ path: String) -> (provider: String, id: String)? {
+        let route = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? path
+        let parts = route.split(separator: "/").map(String.init)
+        guard parts.count == 4, parts[0] == "resets", parts[3] == "apply",
+              let id = parts[2].removingPercentEncoding else { return nil }
+        return (parts[1], id)
+    }
+
+    func respond(method: String, path: String, applyResult: BankedResetApplyResult? = nil) -> UsageAPIResponse {
         let route = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? path
         let segments = route.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        if let apply = Self.applyRoute(path) {
+            guard let provider = ProviderKind.from(routeKey: apply.provider) else { return error(404, "Unknown provider.") }
+            guard method == "POST" else { return error(405, "Method not allowed.") }
+            guard let result = applyResult else { return error(500, "Reset result missing.") }
+            return json(UsageAPIResetApplyPayload(provider: provider.routeKey, resetID: result.resetID,
+                outcome: result.outcome.rawValue, applied: result.applied, message: result.message,
+                usage: UsageAPIProviderPayload(snapshot: result.usage, updatedAt: providers(provider).updatedAt)),
+                status: result.outcome.httpStatus)
+        }
         if route == "/refresh" && method == "POST" {
             return bulkUsage()
         }
@@ -197,6 +256,17 @@ struct UsageAPIRouter {
 
         if segments == ["health"] {
             return json(["status": "ok"])
+        }
+        if segments == ["resets"] {
+            let resets = ProviderKind.allCases.flatMap { provider in
+                providers(provider).bankedResets.map { UsageAPIBankedResetPayload(provider: provider.routeKey, reset: $0) }
+            }.sorted {
+                let lhs = $0.reset.expiresAt ?? .distantFuture
+                let rhs = $1.reset.expiresAt ?? .distantFuture
+                if lhs != rhs { return lhs < rhs }
+                return ($0.provider, $0.reset.id) < ($1.provider, $1.reset.id)
+            }
+            return json(UsageAPIResetsPayload(autoApply: autoApply(), resets: resets))
         }
         if segments == ["usage"] {
             return bulkUsage()
@@ -212,7 +282,7 @@ struct UsageAPIRouter {
 
     private func bulkUsage() -> UsageAPIResponse {
         let payloads = Dictionary(uniqueKeysWithValues: ProviderKind.allCases.map { ($0.routeKey, providers($0)) })
-        return json(UsageAPIBulkPayload(providers: payloads, lastUpdated: lastUpdated()))
+        return json(UsageAPIBulkPayload(providers: payloads, lastUpdated: lastUpdated(), bankedResetAutoApply: autoApply()))
     }
 
     private func json<Value: Encodable>(_ value: Value, status: Int = 200) -> UsageAPIResponse {
@@ -326,7 +396,10 @@ final class UsageAPIServer: ObservableObject {
                     )
                 }
             },
-            lastUpdated: { MainActor.assumeIsolated { store.lastUpdated } }
+            lastUpdated: { MainActor.assumeIsolated { store.lastUpdated } },
+            autoApply: { MainActor.assumeIsolated {
+                .init(enabled: store.bankedResetAutoApplyEnabled, leadMinutes: store.bankedResetAutoApplyLeadMinutes)
+            } }
         )
 
         if followSettings {
@@ -479,6 +552,11 @@ final class UsageAPIServer: ObservableObject {
         }
         if request.method == "POST", request.path.split(separator: "?", maxSplits: 1).first == "/refresh" {
             await store.refresh()
+        }
+        if request.method == "POST", let route = UsageAPIRouter.applyRoute(request.path),
+           let provider = ProviderKind.from(routeKey: route.provider) {
+            let result = await store.applyBankedReset(provider: provider, id: route.id)
+            return router.respond(method: request.method, path: request.path, applyResult: result)
         }
         return router.respond(method: request.method, path: request.path)
     }

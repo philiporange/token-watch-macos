@@ -196,6 +196,12 @@ private struct ProviderCard: View {
     private var isRefreshing: Bool { store.refreshingProviders.contains(snapshot.provider) }
     private var lastUpdated: Date? { store.lastUpdatedByProvider[snapshot.provider] }
 
+    private var bankedResets: [BankedReset] {
+        let prefix = snapshot.provider.routeKey + ":"
+        let retained = store.bankedResetResultRows.filter { $0.key.hasPrefix(prefix) }.values
+        return snapshot.bankedResets + retained.filter { row in !snapshot.bankedResets.contains { $0.id == row.id } }.sorted { $0.id < $1.id }
+    }
+
     private var modelWindows: [ModelUsageWindow] {
         if snapshot.provider == .gemini && !showGeminiOtherModels {
             return []
@@ -225,9 +231,57 @@ private struct ProviderCard: View {
                 }
             }
             .opacity(isRefreshing ? 0.5 : 1)
+            if !bankedResets.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(loc.bankedResets).font(.caption).foregroundStyle(.secondary)
+                    ForEach(bankedResets) { reset in
+                        bankedResetRow(reset)
+                    }
+                }
+            }
         }
         .padding(12)
         .background(cardBackground)
+    }
+
+    private func bankedResetRow(_ reset: BankedReset) -> some View {
+        let key = UsageStore.resetKey(provider: snapshot.provider, id: reset.id)
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(reset.title).font(.caption)
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        Text(loc.bankedResetExpiry(reset, now: context.date))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if store.applyingBankedResets.contains(key) {
+                    ProgressView().controlSize(.small)
+                } else if reset.usable {
+                    Button(loc.applyBankedReset) { confirmReset(reset) }
+                        .buttonStyle(.bordered).controlSize(.small)
+                } else {
+                    Text(loc.bankedResetStatus(reset.status))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .help(reset.note ?? "")
+                }
+            }
+            if let message = store.bankedResetMessages[key] {
+                Text(message).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func confirmReset(_ reset: BankedReset) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = String(format: loc.bankedResetQuestion, snapshot.provider.rawValue)
+        alert.informativeText = String(format: loc.bankedResetConfirmation, reset.title, loc.bankedResetExpiry(reset))
+        alert.addButton(withTitle: loc.bankedResetCancel).keyEquivalent = "\r"
+        alert.addButton(withTitle: loc.applyResetButton).keyEquivalent = ""
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        Task { await store.applyBankedReset(provider: snapshot.provider, id: reset.id) }
     }
 
     private var header: some View {
@@ -462,6 +516,7 @@ struct SettingsView: View {
             generalSection
             agentsSection
             usageAPISection
+            bankedResetsSection
             paceRevealSection
             resetRevealSection
             nearingResetRevealSection
@@ -625,6 +680,22 @@ struct SettingsView: View {
             return .orange
         case .error:
             return .red
+        }
+    }
+
+    private var bankedResetsSection: some View {
+        Section(loc.bankedResets) {
+            Toggle(loc.bankedResetAutoEnable, isOn: $store.bankedResetAutoApplyEnabled)
+                .toggleStyle(.switch).controlSize(.small)
+            Stepper(String(format: loc.bankedResetLead, store.bankedResetAutoApplyLeadMinutes),
+                    value: $store.bankedResetAutoApplyLeadMinutes, in: 1...60)
+                .disabled(!store.bankedResetAutoApplyEnabled)
+            Text(loc.bankedResetAutoDescription).font(.caption).foregroundStyle(.secondary)
+            if let result = store.lastAutoApplyResult {
+                Text("\(result.provider.rawValue) · \(result.title) · \(result.date.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(result.message).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

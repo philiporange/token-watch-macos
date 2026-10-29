@@ -93,6 +93,7 @@ struct ProviderSnapshot {
     var weekly: UsageWindow
     var modelWindows: [ModelUsageWindow] = []
     var detail: String?
+    var bankedResets: [BankedReset] = []
 
     var showsLongWindow: Bool {
         !(provider == .zai && weekly.kind == .monthly)
@@ -305,4 +306,113 @@ enum UsagePacing {
         let sign = rounded >= 0 ? "+" : ""
         return "\(sign)\(Int(rounded))%"
     }
+}
+
+struct BankedReset: Identifiable, Sendable, Equatable, Encodable {
+    let id: String
+    let title: String
+    var detail: String? = nil
+    var grantedAt: Date? = nil
+    var expiresAt: Date? = nil
+    var status: String = "unknown"
+    var usable: Bool = false
+    var remaining: Int = 0
+    var note: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, status, usable, remaining, note
+        case detail = "description"
+        case grantedAt = "granted_at"
+        case expiresAt = "expires_at"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        try c.encode(detail, forKey: .detail)
+        try c.encode(grantedAt, forKey: .grantedAt)
+        try c.encode(expiresAt, forKey: .expiresAt)
+        try c.encode(status, forKey: .status)
+        try c.encode(usable, forKey: .usable)
+        try c.encode(remaining, forKey: .remaining)
+        try c.encode(note, forKey: .note)
+    }
+
+    static func validID(_ id: String) -> Bool {
+        id.range(of: "^[A-Za-z0-9_-]{1,128}$", options: .regularExpression) == id.startIndex..<id.endIndex
+    }
+}
+
+enum BankedResetOutcome: String, Sendable, CaseIterable {
+    case reset, alreadyRedeemed = "already_redeemed", nothingToReset = "nothing_to_reset"
+    case noCredit = "no_credit", cooldown, ineligible, unavailable
+    case rateLimited = "rate_limited", unconfirmed, error, notFound = "not_found", notUsable = "not_usable"
+
+    var applied: Bool { self == .reset || self == .alreadyRedeemed }
+    var httpStatus: Int {
+        switch self {
+        case .notFound: 404
+        case .notUsable: 409
+        case .rateLimited, .unconfirmed, .error: 502
+        default: 200
+        }
+    }
+
+    func message(provider: ProviderKind, detail: String? = nil) -> String {
+        let p = provider.rawValue
+        switch self {
+        case .reset: return "\(p) reset applied."
+        case .alreadyRedeemed: return "This \(p) reset was already applied."
+        case .nothingToReset: return "\(p) has nothing to reset right now; the reset was kept."
+        case .noCredit: return "\(p) reports no reset credits available."
+        case .cooldown: return "\(p) allows another reset later; the reset was kept."
+        case .ineligible, .unavailable: return "\(p) declined the reset; it was kept." + (detail.map { " (\($0))" } ?? "")
+        case .rateLimited: return "\(p) rate limited the request; nothing was applied. Try again shortly."
+        case .unconfirmed: return "Couldn't confirm whether the \(p) reset was applied. Check usage before trying again."
+        case .error: return "\(p) reset failed: \(detail ?? "Unknown error.")"
+        case .notFound: return "That reset is no longer listed. Refresh and try again."
+        case .notUsable: return "That reset can't be applied right now." + (detail.map { " " + $0 } ?? "")
+        }
+    }
+}
+
+struct BankedResetUpstreamResult: Sendable {
+    let outcome: BankedResetOutcome
+    var detail: String? = nil
+}
+
+protocol BankedResetApplying: Sendable {
+    func apply(id: String, idempotencyKey: String) async -> BankedResetUpstreamResult
+}
+
+struct UnavailableBankedResetApplier: BankedResetApplying {
+    func apply(id: String, idempotencyKey: String) async -> BankedResetUpstreamResult {
+        .init(outcome: .error, detail: "Reset applier is not configured.")
+    }
+}
+
+struct BankedResetApplyResult {
+    let provider: ProviderKind
+    let resetID: String
+    let outcome: BankedResetOutcome
+    let message: String
+    let usage: ProviderSnapshot
+    var applied: Bool { outcome.applied }
+}
+
+enum BankedResetAutoApplyPolicy {
+    static func isDue(_ reset: BankedReset, now: Date, leadMinutes: Int,
+                      completed: Bool = false, lastAttempt: Date? = nil) -> Bool {
+        guard reset.usable, !completed, let expiry = reset.expiresAt,
+              expiry > now, expiry.timeIntervalSince(now) <= Double(min(60, max(1, leadMinutes))) * 60 else { return false }
+        return lastAttempt.map { now.timeIntervalSince($0) >= 60 } ?? true
+    }
+}
+
+struct BankedResetAutoApplyResult {
+    let provider: ProviderKind
+    let title: String
+    let message: String
+    let date: Date
 }

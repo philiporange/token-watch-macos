@@ -70,6 +70,35 @@ private struct MissingCommandCodeSnapshotFetcher: ProviderSnapshotFetching {
 
 @MainActor
 final class UsageStore: ObservableObject {
+    static let bankedResetAutoApplyEnabledKey = "bankedResetAutoApplyEnabled"
+    static let bankedResetAutoApplyLeadMinutesKey = "bankedResetAutoApplyLeadMinutes"
+    private static let resetKeysKey = "bankedResetIdempotencyKeys"
+
+    @Published var bankedResetAutoApplyEnabled: Bool {
+        didSet {
+            userDefaults.set(bankedResetAutoApplyEnabled, forKey: Self.bankedResetAutoApplyEnabledKey)
+            restartAutoApplyLoop()
+        }
+    }
+    @Published var bankedResetAutoApplyLeadMinutes: Int {
+        didSet {
+            let clamped = min(60, max(1, bankedResetAutoApplyLeadMinutes))
+            if clamped != bankedResetAutoApplyLeadMinutes { bankedResetAutoApplyLeadMinutes = clamped }
+            userDefaults.set(clamped, forKey: Self.bankedResetAutoApplyLeadMinutesKey)
+        }
+    }
+    @Published private(set) var lastAutoApplyResult: BankedResetAutoApplyResult?
+    @Published private(set) var applyingBankedResets: Set<String> = []
+    @Published private(set) var bankedResetMessages: [String: String] = [:]
+    @Published private(set) var bankedResetResultRows: [String: BankedReset] = [:]
+    private let resetAppliers: [ProviderKind: any BankedResetApplying]
+    private var resetTasks: [String: Task<BankedResetApplyResult, Never>] = [:]
+    private var autoApplyLoopTask: Task<Void, Never>?
+    private var autoApplyTickRunning = false
+    private var resetCompleted: Set<String> = []
+    private var resetAttempts: [String: Date] = [:]
+    private let runsAutoApplyLoop: Bool
+
     private static let autoRefreshIntervalKey = "autoRefreshInterval"
 
     @Published var claude: ProviderSnapshot = .loading(.claude)
@@ -113,8 +142,14 @@ final class UsageStore: ObservableObject {
         commandCodeProbe: any ProviderSnapshotFetching = MissingCommandCodeSnapshotFetcher(),
         launchAtStartupManager: any LaunchAtStartupManaging = LaunchAtStartupManager(),
         userDefaults: UserDefaults = .standard,
-        startRefreshLoop: Bool = true
+        startRefreshLoop: Bool = true,
+        resetAppliers: [ProviderKind: any BankedResetApplying] = [:]
     ) {
+        self.resetAppliers = resetAppliers
+        self.runsAutoApplyLoop = startRefreshLoop
+        self.bankedResetAutoApplyEnabled = userDefaults.bool(forKey: Self.bankedResetAutoApplyEnabledKey)
+        self.bankedResetAutoApplyLeadMinutes = min(60, max(1,
+            userDefaults.object(forKey: Self.bankedResetAutoApplyLeadMinutesKey) as? Int ?? 5))
         self.claudeProbe = claudeProbe
         self.codexProbe = codexProbe
         self.geminiProbe = geminiProbe
@@ -133,6 +168,7 @@ final class UsageStore: ObservableObject {
 
         if startRefreshLoop {
             restartRefreshLoop()
+            restartAutoApplyLoop()
         }
     }
 
@@ -144,12 +180,17 @@ final class UsageStore: ObservableObject {
             zaiProbe: ZaiProbe(),
             museProbe: MuseProbe(),
             alicloudProbe: AliCloudProbe(),
-            commandCodeProbe: CommandCodeProbe()
+            commandCodeProbe: CommandCodeProbe(),
+            resetAppliers: [
+                .claude: ClaudeBankedResetApplier(probe: ClaudeProbe(), transport: ClaudeLiveResetTransport()),
+                .codex: CodexBankedResetApplier(transport: CodexLiveResetTransport())
+            ]
         )
     }
 
     deinit {
         refreshLoopTask?.cancel()
+        autoApplyLoopTask?.cancel()
     }
 
     var visibleSnapshots: [ProviderSnapshot] {
@@ -196,6 +237,15 @@ final class UsageStore: ObservableObject {
             let current = await probe(for: provider).fetch()
             let merged = merge(previous: previous, current: current, provider: provider)
             setSnapshot(merged, for: provider)
+            let prefix = provider.routeKey + ":"
+            bankedResetMessages = bankedResetMessages.filter { !$0.key.hasPrefix(prefix) }
+            bankedResetResultRows = bankedResetResultRows.filter { !$0.key.hasPrefix(prefix) }
+            if hasUsageData(in: current) {
+                var keys = userDefaults.dictionary(forKey: Self.resetKeysKey) as? [String: String] ?? [:]
+                let listed = Set(current.bankedResets.map { Self.resetKey(provider: provider, id: $0.id) })
+                keys = keys.filter { !$0.key.hasPrefix(prefix) || listed.contains($0.key) }
+                userDefaults.set(keys, forKey: Self.resetKeysKey)
+            }
 
             let now = Date.now
             lastUpdatedByProvider[provider] = now
@@ -205,6 +255,90 @@ final class UsageStore: ObservableObject {
         providerRefreshTasks[provider] = task
         await task.value
         providerRefreshTasks[provider] = nil
+    }
+
+    static func resetKey(provider: ProviderKind, id: String) -> String { provider.routeKey + ":" + id }
+
+    func applyBankedReset(provider: ProviderKind, id: String) async -> BankedResetApplyResult {
+        let key = Self.resetKey(provider: provider, id: id)
+        if let task = resetTasks[key] { return await task.value }
+        let current = snapshot(for: provider)
+        guard let reset = current.bankedResets.first(where: { $0.id == id }) else {
+            let message = BankedResetOutcome.notFound.message(provider: provider)
+            bankedResetMessages[key] = message
+            return .init(provider: provider, resetID: id, outcome: .notFound, message: message, usage: current)
+        }
+        guard reset.usable else {
+            let message = BankedResetOutcome.notUsable.message(provider: provider, detail: reset.note)
+            bankedResetMessages[key] = message
+            return .init(provider: provider, resetID: id, outcome: .notUsable, message: message, usage: current)
+        }
+        var keys = userDefaults.dictionary(forKey: Self.resetKeysKey) as? [String: String] ?? [:]
+        let requestKey = keys[key] ?? UUID().uuidString
+        keys[key] = requestKey
+        userDefaults.set(keys, forKey: Self.resetKeysKey)
+        applyingBankedResets.insert(key)
+        let task = Task { @MainActor in
+            let upstream = await (resetAppliers[provider] ?? UnavailableBankedResetApplier()).apply(id: id, idempotencyKey: requestKey)
+            await refresh(provider)
+            let message = upstream.outcome.message(provider: provider, detail: upstream.detail)
+            bankedResetMessages[key] = message
+            if !snapshot(for: provider).bankedResets.contains(where: { $0.id == id }) {
+                var row = reset
+                row.usable = false
+                row.status = upstream.outcome.applied ? "redeemed" : "unavailable"
+                bankedResetResultRows[key] = row
+            }
+            if upstream.outcome.applied { resetCompleted.insert(key) }
+            return BankedResetApplyResult(provider: provider, resetID: id, outcome: upstream.outcome,
+                                         message: message, usage: snapshot(for: provider))
+        }
+        resetTasks[key] = task
+        let result = await task.value
+        resetTasks[key] = nil
+        applyingBankedResets.remove(key)
+        return result
+    }
+
+    func autoApplyTick(now fixedNow: Date? = nil) async {
+        let now = fixedNow ?? .now
+        guard bankedResetAutoApplyEnabled, !autoApplyTickRunning else { return }
+        autoApplyTickRunning = true
+        defer { autoApplyTickRunning = false }
+        let due = [ProviderKind.claude, .codex].flatMap { provider in
+            snapshot(for: provider).bankedResets.map { (provider, $0) }
+        }.filter { provider, reset in
+            let key = Self.resetKey(provider: provider, id: reset.id)
+            return BankedResetAutoApplyPolicy.isDue(reset, now: now, leadMinutes: bankedResetAutoApplyLeadMinutes,
+                                                   completed: resetCompleted.contains(key), lastAttempt: resetAttempts[key])
+        }.sorted { $0.1.expiresAt! < $1.1.expiresAt! }
+        for (provider, reset) in due {
+            guard bankedResetAutoApplyEnabled, !Task.isCancelled else { return }
+            let key = Self.resetKey(provider: provider, id: reset.id)
+            let attemptNow = fixedNow ?? .now
+            guard BankedResetAutoApplyPolicy.isDue(reset, now: attemptNow, leadMinutes: bankedResetAutoApplyLeadMinutes,
+                completed: resetCompleted.contains(key), lastAttempt: resetAttempts[key]) else { continue }
+            resetAttempts[key] = attemptNow
+            await refresh(provider)
+            let recheckNow = fixedNow ?? .now
+            guard bankedResetAutoApplyEnabled, !Task.isCancelled,
+                  let fresh = snapshot(for: provider).bankedResets.first(where: { $0.id == reset.id }),
+                  BankedResetAutoApplyPolicy.isDue(fresh, now: recheckNow, leadMinutes: bankedResetAutoApplyLeadMinutes,
+                                                  completed: resetCompleted.contains(key)) else { continue }
+            let result = await applyBankedReset(provider: provider, id: fresh.id)
+            lastAutoApplyResult = .init(provider: provider, title: fresh.title, message: result.message, date: now)
+        }
+    }
+
+    private func restartAutoApplyLoop() {
+        autoApplyLoopTask?.cancel()
+        guard bankedResetAutoApplyEnabled, runsAutoApplyLoop else { return }
+        autoApplyLoopTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                await self?.autoApplyTick()
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
     }
 
     func setAutoRefreshInterval(_ interval: AutoRefreshInterval) {
