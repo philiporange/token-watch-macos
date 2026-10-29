@@ -1,17 +1,26 @@
-"""Collect Codex quota usage through the local ``codex app-server`` process.
+"""Read Codex usage and apply banked credits through its app-server protocol.
 
 The collector performs the app-server JSON-RPC initialization handshake, reads
 ``account/rateLimits/read``, and classifies returned windows by duration because
 Codex does not guarantee that primary and secondary map to fixed quota periods.
+Credit application uses the same handshake and tracks delivery before waiting
+for a response, so uncertain consumes remain distinct from explicit rejections.
 """
 
 import asyncio
-from datetime import datetime, timezone
 import json
+import re
+from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from aipace_server.models import ProviderSnapshot, UsageWindow
+from aipace_server.models import (
+    BankedReset,
+    ProviderSnapshot,
+    ResetApplyOutcome,
+    UsageWindow,
+)
 from aipace_server.processes import find_executable, process_environment
 
 
@@ -19,15 +28,22 @@ class CodexError(RuntimeError):
     """Report a failure to retrieve or understand Codex rate limits."""
 
 
+class CodexRPCError(CodexError):
+    """Report an explicit JSON-RPC rejection rather than an uncertain delivery."""
+
+
 async def _write_json_line(
     process: asyncio.subprocess.Process,
     payload: dict[str, Any],
+    on_written: Callable[[], None] | None = None,
 ) -> None:
     """Write one JSON-RPC message to the app-server standard input."""
 
     if process.stdin is None:
         raise CodexError("Codex app-server standard input is unavailable.")
     process.stdin.write(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+    if on_written is not None:
+        on_written()
     await process.stdin.drain()
 
 
@@ -44,11 +60,12 @@ async def _read_response(
             payload = json.loads(line)
         except (json.JSONDecodeError, UnicodeDecodeError):
             continue
-        if payload.get("id") != response_id:
+        if not isinstance(payload, dict) or payload.get("id") != response_id:
             continue
         error = payload.get("error")
-        if isinstance(error, dict) and isinstance(error.get("message"), str):
-            raise CodexError(error["message"])
+        if error is not None:
+            message = error.get("message") if isinstance(error, dict) else str(error)
+            raise CodexRPCError(message or "Codex rejected the request.")
         return payload
     raise CodexError(
         f"Codex app-server closed before returning response id {response_id}."
@@ -129,65 +146,171 @@ def _usage_window(kind: str, window: dict[str, Any] | None) -> UsageWindow:
     )
 
 
-async def fetch_codex_usage(timeout: float = 20) -> ProviderSnapshot:
-    """Return the current Codex usage snapshot, including provider-local errors."""
+async def _rpc_call(
+    method: str,
+    params: dict[str, Any],
+    timeout: float,
+    on_written: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Run one operation after the shared handshake and always reap the process."""
+
+    executable = find_executable("codex")
+    if executable is None:
+        raise CodexError("codex is not installed or not on PATH.")
+
+    process = await asyncio.create_subprocess_exec(
+        executable,
+        "-s",
+        "read-only",
+        "app-server",
+        cwd=Path.home(),
+        env=process_environment(),
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        async with asyncio.timeout(timeout):
+            await _write_json_line(
+                process,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"clientInfo": {"name": "aipace", "version": "0.1.0"}},
+                },
+            )
+            await _read_response(process, 1)
+            await _write_json_line(
+                process,
+                {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+            )
+            await _write_json_line(
+                process,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": method,
+                    "params": params,
+                },
+                on_written,
+            )
+            payload = await _read_response(process, 2)
+    finally:
+        if process.stdin is not None:
+            process.stdin.close()
+        if process.returncode is None:
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=1)
+            except ProcessLookupError:
+                pass
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+    return payload
+
+
+def _parse_banked_resets(value: Any, now: datetime | None = None) -> list[BankedReset]:
+    """Normalize valid Codex credits while tolerating absent or partial inventory."""
+
+    now = now or datetime.now(timezone.utc)
+    credits = value.get("credits") if isinstance(value, dict) else None
+    if not isinstance(credits, list):
+        return []
+    resets = []
+    for credit in credits:
+        if not isinstance(credit, dict):
+            continue
+        reset_id = credit.get("id")
+        if not isinstance(reset_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}", reset_id
+        ):
+            continue
+        dates = []
+        for key in ("grantedAt", "expiresAt"):
+            timestamp = _numeric(credit.get(key))
+            try:
+                dates.append(
+                    datetime.fromtimestamp(timestamp, timezone.utc)
+                    if timestamp is not None
+                    else None
+                )
+            except (ValueError, OverflowError, OSError):
+                dates.append(None)
+        granted_at, expires_at = dates
+        status = credit.get("status")
+        status = (
+            status if status in ("available", "redeeming", "redeemed") else "unknown"
+        )
+        if expires_at is not None and expires_at <= now:
+            status = "expired"
+        resets.append(
+            BankedReset(
+                id=reset_id,
+                title=credit.get("title")
+                if isinstance(credit.get("title"), str)
+                else "Codex reset",
+                description=credit.get("description")
+                if isinstance(credit.get("description"), str)
+                else None,
+                granted_at=granted_at,
+                expires_at=expires_at,
+                status=status,
+                usable=status == "available",
+                remaining=int(status == "available"),
+            )
+        )
+    return resets
+
+
+async def apply_codex_reset(
+    reset_id: str, request_key: str, timeout: float = 30
+) -> ResetApplyOutcome:
+    """Consume one explicit credit, preserving uncertainty after request delivery."""
+
+    written = False
+
+    def mark_written() -> None:
+        nonlocal written
+        written = True
 
     try:
-        executable = find_executable("codex")
-        if executable is None:
-            raise CodexError("codex is not installed or not on PATH.")
-
-        process = await asyncio.create_subprocess_exec(
-            executable,
-            "-s",
-            "read-only",
-            "app-server",
-            cwd=Path.home(),
-            env=process_environment(),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+        payload = await _rpc_call(
+            "account/rateLimitResetCredit/consume",
+            {"creditId": reset_id, "idempotencyKey": request_key},
+            timeout,
+            mark_written,
         )
-        try:
-            async with asyncio.timeout(timeout):
-                await _write_json_line(
-                    process,
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "initialize",
-                        "params": {
-                            "clientInfo": {"name": "aipace", "version": "0.1.0"}
-                        },
-                    },
-                )
-                await _read_response(process, 1)
-                await _write_json_line(
-                    process,
-                    {"jsonrpc": "2.0", "method": "initialized", "params": {}},
-                )
-                await _write_json_line(
-                    process,
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 2,
-                        "method": "account/rateLimits/read",
-                        "params": {},
-                    },
-                )
-                payload = await _read_response(process, 2)
-        finally:
-            if process.stdin is not None:
-                process.stdin.close()
-            if process.returncode is None:
-                try:
-                    process.terminate()
-                    await asyncio.wait_for(process.wait(), timeout=1)
-                except ProcessLookupError:
-                    pass
-                except asyncio.TimeoutError:
-                    process.kill()
-                    await process.wait()
+        result = payload.get("result")
+        outcome = result.get("outcome") if isinstance(result, dict) else None
+        outcomes = {
+            "reset": "reset",
+            "nothingToReset": "nothing_to_reset",
+            "noCredit": "no_credit",
+            "alreadyRedeemed": "already_redeemed",
+        }
+        mapped = outcomes.get(outcome) if isinstance(outcome, str) else None
+        if mapped is None:
+            return ResetApplyOutcome(
+                outcome="unconfirmed",
+                detail="Codex returned an unknown consume response.",
+            )
+        return ResetApplyOutcome(outcome=mapped)
+    except CodexRPCError as error:
+        return ResetApplyOutcome(outcome="error", detail=str(error))
+    except (CodexError, OSError, asyncio.TimeoutError) as error:
+        return ResetApplyOutcome(
+            outcome="unconfirmed" if written else "error",
+            detail=str(error) or "Codex app-server timed out.",
+        )
+
+
+async def fetch_codex_usage(timeout: float = 20) -> ProviderSnapshot:
+    """Return the current Codex usage and credits, including provider-local errors."""
+
+    try:
+        payload = await _rpc_call("account/rateLimits/read", {}, timeout)
 
         result = payload.get("result")
         rate_limits = result.get("rateLimits") if isinstance(result, dict) else None
@@ -203,6 +326,7 @@ async def fetch_codex_usage(timeout: float = 20) -> ProviderSnapshot:
             provider="Codex",
             five_hour=_usage_window("5h", five_hour),
             weekly=_usage_window("Week", weekly),
+            banked_resets=_parse_banked_resets(result.get("rateLimitResetCredits")),
             detail=f"Plan: {plan_type}" if isinstance(plan_type, str) else None,
         )
     except (CodexError, OSError, asyncio.TimeoutError) as error:

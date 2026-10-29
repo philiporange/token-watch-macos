@@ -1,8 +1,8 @@
 """Cache normalized provider snapshots behind one concurrency-safe refresh.
 
-The cache refreshes all providers concurrently, then publishes their results
-as one immutable point-in-time response so GET requests never trigger provider
-calls or observe a partially completed refresh.
+The cache refreshes all providers concurrently or replaces one provider, then
+publishes an isolated response so GET requests never trigger provider calls or
+observe a partially completed refresh.
 """
 
 import asyncio
@@ -14,7 +14,6 @@ from aipace_server.models import (
     ProviderSnapshot,
     UsageResponse,
 )
-
 
 ProviderFetcher = Callable[[], Awaitable[ProviderSnapshot]]
 
@@ -53,7 +52,15 @@ class UsageCache:
         """Fetch all providers and atomically replace the cached response."""
 
         async with self._refresh_lock:
-            claude, codex, gemini, zai, muse, alicloud, commandcode = await asyncio.gather(
+            (
+                claude,
+                codex,
+                gemini,
+                zai,
+                muse,
+                alicloud,
+                commandcode,
+            ) = await asyncio.gather(
                 self._fetch_claude(),
                 self._fetch_codex(),
                 self._fetch_gemini(),
@@ -94,3 +101,19 @@ class UsageCache:
                 ),
             )
             return self._response.model_copy(deep=True)
+
+    async def refresh_provider(self, route_key: str) -> CachedProviderSnapshot:
+        """Serialize one provider fetch and atomically replace only its entry."""
+
+        async with self._refresh_lock:
+            if self._response is None:
+                raise RuntimeError("Usage cache is not ready.")
+            fetcher = getattr(self, f"_fetch_{route_key}", None)
+            if fetcher is None:
+                raise KeyError(route_key)
+            snapshot = await fetcher()
+            cached = CachedProviderSnapshot(
+                **snapshot.model_dump(), cached_at=datetime.now(timezone.utc)
+            )
+            self._response = self._response.model_copy(update={route_key: cached})
+            return cached.model_copy(deep=True)

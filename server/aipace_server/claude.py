@@ -1,4 +1,4 @@
-"""Collect Claude usage with credentials maintained by the Claude Code CLI.
+"""Read Claude usage and apply explicit reset grants with serialized OAuth credentials.
 
 Credentials come from ``~/.claude/.credentials.json`` or the macOS Keychain --
 whichever is still live, so a stale file cannot shadow a valid Keychain entry --
@@ -6,26 +6,34 @@ falling back to ``CLAUDE_CODE_OAUTH_TOKEN``. Expiring refreshable credentials
 are renewed and persisted before calling Anthropic's OAuth usage endpoint.
 """
 
-from copy import deepcopy
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import asyncio
 import json
 import math
 import os
-from pathlib import Path
+import re
 import subprocess
 import tempfile
 import time
-from typing import Any, Mapping
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 import httpx
 
-from aipace_server.models import ModelUsageWindow, ProviderSnapshot, UsageWindow
+from aipace_server.models import (
+    BankedReset,
+    ModelUsageWindow,
+    ProviderSnapshot,
+    ResetApplyOutcome,
+    UsageWindow,
+)
 from aipace_server.processes import find_executable, process_environment
 
-
-USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1"
+PROFILE_URL = "https://api.anthropic.com/api/oauth/profile"
 REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
 # Scopes the Claude CLI itself requests, used only when the stored credentials
 # do not record what they were granted. Sending a narrower fixed list would
@@ -572,6 +580,7 @@ async def _fetch_claude_usage_unlocked(
                 "Week", usage.get("seven_day"), "No weekly limit returned."
             ),
             model_windows=_model_windows(usage.get("limits")),
+            banked_resets=_parse_banked_resets(usage.get("cedar_ember")),
             detail=_account_detail(loader.home, credentials.subscription_type),
         )
     except (ClaudeError, httpx.HTTPError, OSError, subprocess.SubprocessError) as error:
@@ -592,3 +601,237 @@ async def fetch_claude_usage(
 
     async with _fetch_lock:
         return await _fetch_claude_usage_unlocked(timeout, loader, transport)
+
+
+def _parse_banked_resets(value: Any, now: datetime | None = None) -> list[BankedReset]:
+    """Parse optional cedar grants leniently without breaking quota snapshots."""
+
+    if not isinstance(value, dict) or not isinstance(value.get("grants"), list):
+        return []
+    if not isinstance(value.get("eligible"), bool):
+        return []
+    now = now or datetime.now(timezone.utc)
+    cooldown_until = _parse_date(value.get("cooldown_until"))
+    cooldown = cooldown_until is not None and cooldown_until > now
+    names = {
+        "five_hour": "5h",
+        "seven_day": "weekly",
+        "seven_day_opus": "Opus weekly",
+        "seven_day_sonnet": "Sonnet weekly",
+    }
+    resets = []
+    for grant in value["grants"]:
+        if not isinstance(grant, dict):
+            continue
+        reset_id, left = grant.get("id"), grant.get("resets_left")
+        if not isinstance(reset_id, str) or not re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}", reset_id
+        ):
+            continue
+        if isinstance(left, bool) or not isinstance(left, int) or left < 0:
+            continue
+        if any(
+            not isinstance(grant.get(key, False), bool)
+            for key in ("paused", "usable_now", "use_requires_limit")
+        ):
+            continue
+        expires_at = _parse_date(grant.get("ends_at"))
+        expired = expires_at is not None and expires_at <= now
+        paused = grant.get("paused", False)
+        usable = bool(
+            value["eligible"]
+            and reset_id == value.get("next_grant_id")
+            and grant.get("usable_now")
+            and not paused
+            and not expired
+            and not cooldown
+            and left > 0
+        )
+        status = (
+            "expired"
+            if expired
+            else "redeemed"
+            if left == 0
+            else "paused"
+            if paused
+            else "available"
+            if usable
+            else "unavailable"
+        )
+        note = None
+        if not usable and status not in ("expired", "redeemed"):
+            reason = _trimmed(value.get("ineligible_reason")) or "ineligible"
+            if not value["eligible"]:
+                note = (
+                    "Claude only allows this reset on claude.ai or Claude Desktop."
+                    if reason == "surface"
+                    else f"Claude reports this reset is unavailable ({reason})."
+                )
+            elif cooldown:
+                note = (
+                    f"Claude allows another reset after {cooldown_until.isoformat()}."
+                )
+            elif not grant.get("usable_now") and grant.get("use_requires_limit"):
+                note = "Claude allows this reset once you reach a limit."
+        clears = grant.get("clears")
+        clears = (
+            [names.get(item, item) for item in clears if isinstance(item, str)]
+            if isinstance(clears, list)
+            else []
+        )
+        resets.append(
+            BankedReset(
+                id=reset_id,
+                title=_trimmed(grant.get("label")) or "Claude limit reset",
+                description="Refills " + " and ".join(clears) + " limits"
+                if clears
+                else None,
+                granted_at=_parse_date(grant.get("starts_at")),
+                expires_at=expires_at,
+                status=status,
+                usable=usable,
+                remaining=left,
+                note=note,
+            )
+        )
+    return resets
+
+
+async def _apply_claude_attempt(
+    reset_id: str,
+    request_key: str,
+    access_token: str,
+    client: httpx.AsyncClient,
+) -> ResetApplyOutcome:
+    """Resolve the organization and issue exactly one reset POST without retrying."""
+
+    headers = {
+        "Authorization": f"Bearer {access_token.strip()}",
+        "anthropic-beta": "oauth-2025-04-20",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    response = await client.get(PROFILE_URL, headers=headers)
+    if response.status_code in (401, 403):
+        raise ClaudeAuthenticationError("Claude authentication failed.")
+    if response.status_code == 429:
+        return ResetApplyOutcome(outcome="rate_limited")
+    if not response.is_success:
+        raise ClaudeError(
+            f"Claude profile endpoint returned HTTP {response.status_code}."
+        )
+    try:
+        profile = response.json()
+    except ValueError as error:
+        raise ClaudeError("Claude profile returned an invalid response.") from error
+    org = profile.get("organization") if isinstance(profile, dict) else None
+    org_id = org.get("uuid") if isinstance(org, dict) else None
+    if not isinstance(org_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", org_id):
+        raise ClaudeError("Claude profile returned an invalid organization UUID.")
+    try:
+        response = await client.post(
+            f"https://api.anthropic.com/api/organizations/{org_id}/reset_rate_limits",
+            headers=headers,
+            json={
+                "program": "cedar_ember",
+                "grant_id": reset_id,
+                "request_id": request_key,
+            },
+        )
+    except httpx.TransportError as error:
+        return ResetApplyOutcome(outcome="unconfirmed", detail=str(error))
+    if response.status_code in (401, 403):
+        raise ClaudeAuthenticationError("Claude authentication failed.")
+    if response.status_code == 429:
+        return ResetApplyOutcome(outcome="rate_limited")
+    if not response.is_success:
+        return ResetApplyOutcome(
+            outcome="error",
+            detail=f"Claude reset endpoint returned HTTP {response.status_code}.",
+        )
+    try:
+        payload = response.json()
+    except ValueError:
+        return ResetApplyOutcome(
+            outcome="unconfirmed",
+            detail="Claude reset endpoint returned an invalid response.",
+        )
+    if not isinstance(payload, dict):
+        return ResetApplyOutcome(
+            outcome="unconfirmed",
+            detail="Claude reset endpoint returned an invalid response.",
+        )
+    mapped = {
+        "reset": "reset",
+        "already_used": "already_redeemed",
+        "not_limited": "nothing_to_reset",
+        "cooldown": "cooldown",
+        "ineligible": "ineligible",
+        "unavailable": "unavailable",
+    }
+    result = payload.get("result")
+    outcome = (
+        mapped.get(result, "unavailable") if isinstance(result, str) else "unavailable"
+    )
+    return ResetApplyOutcome(outcome=outcome, detail=_trimmed(payload.get("reason")))
+
+
+async def apply_claude_reset(
+    reset_id: str,
+    request_key: str,
+    timeout: float = 30,
+    loader: CredentialLoader | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ResetApplyOutcome:
+    """Apply one grant under the usage lock, retrying only authentication once."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", reset_id) or not re.fullmatch(
+        r"[A-Za-z0-9_-]{1,64}", request_key
+    ):
+        return ResetApplyOutcome(
+            outcome="error", detail="Invalid Claude reset id or request key."
+        )
+    async with _fetch_lock:
+        loader = loader or CredentialLoader()
+        try:
+            credentials = loader.resolve()
+            if credentials is None:
+                raise ClaudeError("Claude credentials not found.")
+            async with httpx.AsyncClient(
+                timeout=timeout, transport=transport
+            ) as client:
+                if (
+                    loader.needs_refresh(credentials)
+                    and credentials.source != "environment"
+                ):
+                    credentials = await _refresh_credentials(
+                        credentials, loader, client
+                    )
+                try:
+                    return await _apply_claude_attempt(
+                        reset_id, request_key, credentials.access_token, client
+                    )
+                except ClaudeAuthenticationError:
+                    if (
+                        credentials.source == "environment"
+                        or credentials.refresh_token is None
+                    ):
+                        raise
+                    try:
+                        credentials = await _refresh_credentials(
+                            credentials, loader, client
+                        )
+                    except ClaudeError as error:
+                        raise ClaudeAuthenticationError(
+                            "Claude authentication failed."
+                        ) from error
+                    return await _apply_claude_attempt(
+                        reset_id, request_key, credentials.access_token, client
+                    )
+        except (
+            ClaudeError,
+            httpx.HTTPError,
+            OSError,
+            subprocess.SubprocessError,
+        ) as error:
+            return ResetApplyOutcome(outcome="error", detail=str(error))

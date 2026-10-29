@@ -74,6 +74,68 @@ function makeWindow(label, windowData) {
   return wrapper;
 }
 
+function formatExpiry(value) {
+  if (!value) return "No expiry";
+  const date = new Date(value);
+  const minutes = Math.max(0, Math.ceil((date - Date.now()) / 60000));
+  const relative = date <= Date.now() ? "expired" : `in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return `Expires ${date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · ${relative}`;
+}
+
+function renderResets(key, data) {
+  const container = providers[key].querySelector("[data-resets]");
+  container.replaceChildren();
+  const resets = data.banked_resets || [];
+  container.hidden = resets.length === 0;
+  if (!resets.length) return;
+  const heading = document.createElement("h3");
+  heading.textContent = "Banked resets";
+  container.append(heading);
+  resets.forEach((reset) => {
+    const row = document.createElement("div");
+    row.className = "banked-reset";
+    const title = document.createElement("strong");
+    title.textContent = reset.title;
+    const expiry = document.createElement("p");
+    expiry.textContent = formatExpiry(reset.expires_at);
+    const status = document.createElement("p");
+    status.textContent = `${reset.status}${reset.note ? ` · ${reset.note}` : ""}`;
+    row.append(title, expiry, status);
+    if (reset.description) {
+      const description = document.createElement("p");
+      description.textContent = reset.description;
+      row.append(description);
+    }
+    if (reset.usable) {
+      const button = document.createElement("button");
+      button.className = "reset-apply";
+      button.type = "button";
+      button.textContent = "Apply";
+      button.addEventListener("click", async () => {
+        if (!window.confirm(`Apply ${data.provider} reset “${reset.title}”? It resets your current usage windows now and cannot be undone.`)) return;
+        button.disabled = true;
+        try {
+          const response = await fetch(`/resets/${encodeURIComponent(key)}/${encodeURIComponent(reset.id)}/apply`, { method: "POST" });
+          const result = await response.json();
+          if (result.usage) {
+            lastData[key] = result.usage;
+            renderProvider(key, result.usage);
+          }
+          notice.textContent = result.message || result.detail || `Server returned ${response.status}`;
+          notice.classList.add("is-visible");
+        } catch (error) {
+          notice.textContent = `Couldn't confirm whether the ${data.provider} reset was applied. Check usage before trying again. ${error.message}`;
+          notice.classList.add("is-visible");
+        } finally {
+          button.disabled = false;
+        }
+      });
+      row.append(button);
+    }
+    container.append(row);
+  });
+}
+
 function renderProvider(key, data) {
   const card = providers[key];
   card.querySelector(".provider-detail").textContent = data.detail || "Local credentials";
@@ -114,11 +176,14 @@ function renderProvider(key, data) {
     models.append(chip);
   });
 
+  renderResets(key, data);
   card.querySelector("[data-cache]").textContent = `Cached ${formatCached(data.cached_at)}`;
 }
 
 function render(data) {
   lastData = data;
+  const autoApply = data.banked_reset_auto_apply || { enabled: false, lead_minutes: 5 };
+  document.querySelector("#auto-apply").textContent = `Auto-apply ${autoApply.lead_minutes} min before expiry: ${autoApply.enabled ? "on" : "off"}`;
   renderProvider("claude", data.claude);
   renderProvider("codex", data.codex);
   renderProvider("gemini", data.gemini);

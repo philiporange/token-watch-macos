@@ -31,6 +31,25 @@ OpenAPI interface is available at `http://<server-address>:8036/docs`.
 - `GET /usage/alicloud` returns cached AliCloud Model Studio Token Plan usage.
 - `GET /usage/commandcode` returns cached Command Code coding-agent subscription usage.
 - `POST /refresh` fetches all providers concurrently and replaces the cache.
+- `GET /resets` lists all cached banked resets, soonest expiry first (no expiry last),
+  plus `auto_apply` settings.
+- `POST /resets/{provider}/{reset_id}/apply` applies one usable Claude or Codex reset.
+  Returns `provider`, `reset_id`, `outcome`, `applied`, `message`, and refreshed `usage`.
+  Confirmed upstream outcomes return 200, missing resets 404, unusable resets 409,
+  and upstream failures or uncertain outcomes 502. Concurrent requests coalesce;
+  retries reuse the same in-memory idempotency key for each reset.
+
+Every provider payload includes `banked_resets` (empty for unsupported providers).
+`GET /usage` and `POST /refresh` also include `banked_reset_auto_apply` settings.
+The dashboard requires confirmation before applying a reset, which takes effect
+immediately and cannot be undone.
+
+Automatic application defaults to off. Set `AIPACE_AUTO_APPLY_RESETS=true`
+(`1`, `true`, `yes`, or `on`) to apply usable resets shortly before expiry.
+`AIPACE_AUTO_APPLY_LEAD_MINUTES` defaults to 5 and is clamped to 1–60 minutes.
+The server checks every 30 seconds, refreshes eligibility before applying, and
+waits at least 60 seconds before retrying unsuccessful automatic attempts.
+Enable auto-apply in only one place, the Mac app or the server, at a time.
 
 For z.ai, add `ZAI_API_KEY=your_key` to `~/.env`. The server never reads
 `ANTHROPIC_AUTH_TOKEN` for z.ai.

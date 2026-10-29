@@ -1,33 +1,38 @@
 """Serve cached Claude, Codex, Gemini, z.ai, Muse, AliCloud, and Command Code usage snapshots and a dashboard.
 
 The cache is warmed at startup and refreshed explicitly through one POST route.
+Reset routes apply explicit credits, with opt-in expiry checks in the lifespan.
 GET routes only read cached values, while static assets render the same response
 as a responsive local dashboard.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from aipace_server.alicloud import fetch_alicloud_usage
 from aipace_server.cache import UsageCache
-from aipace_server.claude import fetch_claude_usage
-from aipace_server.codex import fetch_codex_usage
+from aipace_server.claude import apply_claude_reset, fetch_claude_usage
+from aipace_server.codex import apply_codex_reset, fetch_codex_usage
 from aipace_server.commandcode import fetch_commandcode_usage
-from aipace_server.gemini import fetch_gemini_usage
-from aipace_server.muse import fetch_muse_usage
-from aipace_server.zai import fetch_zai_usage
 from aipace_server.config import settings
+from aipace_server.gemini import fetch_gemini_usage
 from aipace_server.models import (
+    ApplyResetResponse,
+    AutoApplySettings,
     CachedProviderSnapshot,
     HealthResponse,
+    ResetsResponse,
     UsageResponse,
 )
-
+from aipace_server.muse import fetch_muse_usage
+from aipace_server.resets import ResetService, apply_status_code
+from aipace_server.zai import fetch_zai_usage
 
 static_directory = Path(__file__).parent / "static"
 usage_cache = UsageCache(
@@ -50,13 +55,28 @@ def _cached_response(cache: UsageCache) -> UsageResponse:
     return response
 
 
-def create_app(cache: UsageCache = usage_cache) -> FastAPI:
-    """Build the FastAPI application around a supplied usage cache."""
+def create_app(
+    cache: UsageCache = usage_cache,
+    reset_service: ResetService | None = None,
+) -> FastAPI:
+    """Build routes with injected reset operations; this factory creates no live appliers."""
+
+    resets = reset_service or ResetService(cache, {})
+
+    def response_with_settings(response: UsageResponse) -> UsageResponse:
+        return response.model_copy(update={"banked_reset_auto_apply": resets.settings})
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         await cache.refresh()
-        yield
+        task = asyncio.create_task(resets.run()) if resets.settings.enabled else None
+        try:
+            yield
+        finally:
+            if task is not None:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
     application = FastAPI(
         title="Token Watch Usage API",
@@ -128,15 +148,50 @@ def create_app(cache: UsageCache = usage_cache) -> FastAPI:
     async def usage() -> UsageResponse:
         """Return all current cached provider snapshots."""
 
-        return _cached_response(cache)
+        return response_with_settings(_cached_response(cache))
 
     @application.post("/refresh", response_model=UsageResponse)
     async def refresh() -> UsageResponse:
         """Refresh all providers concurrently and replace the cache."""
 
-        return await cache.refresh()
+        return response_with_settings(await cache.refresh())
+
+    @application.get("/resets", response_model=ResetsResponse)
+    async def list_resets() -> ResetsResponse:
+        """List cached reset credits across providers without upstream calls."""
+
+        _cached_response(cache)
+        return resets.list_resets()
+
+    @application.post(
+        "/resets/{provider}/{reset_id}/apply", response_model=ApplyResetResponse
+    )
+    async def apply_reset(provider: str, reset_id: str) -> JSONResponse:
+        """Apply an explicitly selected usable credit through the reset service."""
+
+        _cached_response(cache)
+        try:
+            result = await resets.apply(provider, reset_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Unknown provider.") from None
+        return JSONResponse(
+            result.model_dump(mode="json"), status_code=apply_status_code(result)
+        )
 
     return application
 
 
-app = create_app()
+reset_service = ResetService(
+    usage_cache,
+    {
+        "codex": lambda reset_id, key: apply_codex_reset(reset_id, key),
+        "claude": lambda reset_id, key: apply_claude_reset(
+            reset_id, key, settings.request_timeout
+        ),
+    },
+    AutoApplySettings(
+        enabled=settings.auto_apply_resets,
+        lead_minutes=settings.auto_apply_lead_minutes,
+    ),
+)
+app = create_app(usage_cache, reset_service)
