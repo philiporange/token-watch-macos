@@ -1103,4 +1103,89 @@ extension Loc {
         let index = AppLanguage.allCases.firstIndex(of: lang) ?? 0
         return (labels[status] ?? labels["unknown"]!)[index]
     }
+
+    var bankedResetRemindersEnable: String {
+        switch lang {
+        case .english: return "Notify before banked resets expire"
+        case .spanish: return "Avisar antes de que caduquen los reinicios guardados"
+        case .french: return "Notifier avant l’expiration des réinitialisations en réserve"
+        case .german: return "Vor Ablauf gespeicherter Zurücksetzungen benachrichtigen"
+        case .japanese: return "保存されたリセットの期限切れ前に通知"
+        case .korean: return "저장된 초기화 만료 전에 알림"
+        case .chineseSimplified: return "在已保存的重置到期前通知"
+        }
+    }
+
+    var bankedResetRemindersCaption: String {
+        switch lang {
+        case .english: return "24 h, 12 h, 4 h, 1 h and 15 min before expiry"
+        case .spanish: return "24 h, 12 h, 4 h, 1 h y 15 min antes de caducar"
+        case .french: return "24 h, 12 h, 4 h, 1 h et 15 min avant expiration"
+        case .german: return "24 Std., 12 Std., 4 Std., 1 Std. und 15 Min. vor Ablauf"
+        case .japanese: return "期限切れの24時間、12時間、4時間、1時間、15分前"
+        case .korean: return "만료 24시간, 12시간, 4시간, 1시간 및 15분 전"
+        case .chineseSimplified: return "到期前24小时、12小时、4小时、1小时和15分钟"
+        }
+    }
+
+    var bankedResetRemindersDenied: String {
+        switch lang {
+        case .english: return "Notifications are off for Token Watch in System Settings."
+        case .spanish: return "Las notificaciones de Token Watch están desactivadas en Ajustes del Sistema."
+        case .french: return "Les notifications de Token Watch sont désactivées dans Réglages Système."
+        case .german: return "Mitteilungen für Token Watch sind in den Systemeinstellungen deaktiviert."
+        case .japanese: return "システム設定でToken Watchの通知がオフになっています。"
+        case .korean: return "시스템 설정에서 Token Watch 알림이 꺼져 있습니다."
+        case .chineseSimplified: return "系统设置中已关闭 Token Watch 的通知。"
+        }
+    }
+
+    var bankedResetReminderManual: String {
+        switch lang {
+        case .english: return "Apply it from the Token Watch menu before then."
+        case .spanish: return "Aplícalo desde el menú de Token Watch antes de esa fecha."
+        case .french: return "Appliquez-la depuis le menu Token Watch avant cette échéance."
+        case .german: return "Vorher über das Token Watch-Menü anwenden."
+        case .japanese: return "期限までにToken Watchメニューから適用してください。"
+        case .korean: return "만료 전에 Token Watch 메뉴에서 적용하세요."
+        case .chineseSimplified: return "请在到期前从 Token Watch 菜单应用。"
+        }
+    }
+
+    func bankedResetReminderExpiry(title: String, date: String) -> String {
+        switch lang {
+        case .english: return "“\(title)” expires \(date)."
+        case .spanish: return "“\(title)” caduca el \(date)."
+        case .french: return "« \(title) » expire le \(date)."
+        case .german: return "„\(title)“ läuft am \(date) ab."
+        case .japanese: return "「\(title)」の期限は\(date)です。"
+        case .korean: return "“\(title)” 만료: \(date)."
+        case .chineseSimplified: return "“\(title)”将于\(date)到期。"
+        }
+    }
+
+    func bankedResetReminderAutomatic(minutes: Int) -> String {
+        switch lang {
+        case .english: return "Token Watch will apply it automatically \(minutes) minutes before it expires."
+        case .spanish: return "Token Watch lo aplicará automáticamente \(minutes) minutos antes de que caduque."
+        case .french: return "Token Watch l’appliquera automatiquement \(minutes) minutes avant son expiration."
+        case .german: return "Token Watch wendet sie \(minutes) Minuten vor Ablauf automatisch an."
+        case .japanese: return "Token Watchが期限の\(minutes)分前に自動適用します。"
+        case .korean: return "Token Watch가 만료 \(minutes)분 전에 자동으로 적용합니다."
+        case .chineseSimplified: return "Token Watch 将在到期前\(minutes)分钟自动应用。"
+        }
+    }
+
+    func bankedResetReminderTitle(provider: String, minutes: Int) -> String {
+        let hours = minutes / 60
+        switch lang {
+        case .english: return "\(provider) reset expires in " + (minutes == 15 ? "15 minutes" : hours == 1 ? "1 hour" : "\(hours) hours")
+        case .spanish: return "El reinicio de \(provider) caduca en " + (minutes == 15 ? "15 minutos" : hours == 1 ? "1 hora" : "\(hours) horas")
+        case .french: return "La réinitialisation \(provider) expire dans " + (minutes == 15 ? "15 minutes" : hours == 1 ? "1 heure" : "\(hours) heures")
+        case .german: return "\(provider)-Zurücksetzung läuft in " + (minutes == 15 ? "15 Minuten" : hours == 1 ? "1 Stunde" : "\(hours) Stunden") + " ab"
+        case .japanese: return "\(provider)のリセットは" + (minutes == 15 ? "15分" : "\(hours)時間") + "後に期限切れ"
+        case .korean: return "\(provider) 초기화가 " + (minutes == 15 ? "15분" : "\(hours)시간") + " 후 만료됩니다"
+        case .chineseSimplified: return "\(provider) 重置将在" + (minutes == 15 ? "15分钟" : "\(hours)小时") + "后到期"
+        }
+    }
 }

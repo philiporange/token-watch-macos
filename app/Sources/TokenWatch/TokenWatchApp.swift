@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             openSettings: openSettings
         )
+        store.bankedResetReminders.onReminderClicked = { [weak self] in
+            self?.statusItemController?.showPopover()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

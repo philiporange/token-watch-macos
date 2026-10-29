@@ -78,6 +78,7 @@ final class UsageStore: ObservableObject {
         didSet {
             userDefaults.set(bankedResetAutoApplyEnabled, forKey: Self.bankedResetAutoApplyEnabledKey)
             restartAutoApplyLoop()
+            synchronizeBankedResetReminders()
         }
     }
     @Published var bankedResetAutoApplyLeadMinutes: Int {
@@ -85,6 +86,7 @@ final class UsageStore: ObservableObject {
             let clamped = min(60, max(1, bankedResetAutoApplyLeadMinutes))
             if clamped != bankedResetAutoApplyLeadMinutes { bankedResetAutoApplyLeadMinutes = clamped }
             userDefaults.set(clamped, forKey: Self.bankedResetAutoApplyLeadMinutesKey)
+            synchronizeBankedResetReminders()
         }
     }
     @Published private(set) var lastAutoApplyResult: BankedResetAutoApplyResult?
@@ -101,8 +103,14 @@ final class UsageStore: ObservableObject {
 
     private static let autoRefreshIntervalKey = "autoRefreshInterval"
 
-    @Published var claude: ProviderSnapshot = .loading(.claude)
-    @Published var codex: ProviderSnapshot = .loading(.codex)
+    let bankedResetReminders: BankedResetReminderCoordinator
+
+    @Published var claude: ProviderSnapshot = .loading(.claude) {
+        didSet { synchronizeBankedResetReminders() }
+    }
+    @Published var codex: ProviderSnapshot = .loading(.codex) {
+        didSet { synchronizeBankedResetReminders() }
+    }
     @Published var gemini: ProviderSnapshot = .loading(.gemini)
     @Published var zai: ProviderSnapshot = .loading(.zai)
     @Published var muse: ProviderSnapshot = .loading(.muse)
@@ -143,8 +151,11 @@ final class UsageStore: ObservableObject {
         launchAtStartupManager: any LaunchAtStartupManaging = LaunchAtStartupManager(),
         userDefaults: UserDefaults = .standard,
         startRefreshLoop: Bool = true,
-        resetAppliers: [ProviderKind: any BankedResetApplying] = [:]
+        resetAppliers: [ProviderKind: any BankedResetApplying] = [:],
+        notificationScheduler: (any BankedResetNotificationScheduling)? = nil
     ) {
+        self.bankedResetReminders = BankedResetReminderCoordinator(
+            scheduler: notificationScheduler ?? makeBankedResetNotificationScheduler(), userDefaults: userDefaults)
         self.resetAppliers = resetAppliers
         self.runsAutoApplyLoop = startRefreshLoop
         self.bankedResetAutoApplyEnabled = userDefaults.bool(forKey: Self.bankedResetAutoApplyEnabledKey)
@@ -255,6 +266,14 @@ final class UsageStore: ObservableObject {
         providerRefreshTasks[provider] = task
         await task.value
         providerRefreshTasks[provider] = nil
+    }
+
+    func synchronizeBankedResetReminders() {
+        bankedResetReminders.snapshots = [claude, codex]
+        bankedResetReminders.autoApplyEnabled = bankedResetAutoApplyEnabled
+        bankedResetReminders.leadMinutes = bankedResetAutoApplyLeadMinutes
+        bankedResetReminders.language = AppLanguage(rawValue: userDefaults.string(forKey: "appLanguage") ?? "en") ?? .english
+        Task { await bankedResetReminders.synchronize() }
     }
 
     static func resetKey(provider: ProviderKind, id: String) -> String { provider.routeKey + ":" + id }
@@ -535,7 +554,9 @@ final class UsageStore: ObservableObject {
 
         guard hasUsageData(in: previous) else {
             preservedFailureCounts[provider] = 0
-            return current
+            var failed = current
+            failed.bankedResets = previous.bankedResets
+            return failed
         }
 
         let lowercasedMessage = message(in: current)?.lowercased() ?? ""
@@ -563,6 +584,8 @@ final class UsageStore: ObservableObject {
         }
 
         preservedFailureCounts[provider] = 0
-        return current
+        var failed = current
+        failed.bankedResets = previous.bankedResets
+        return failed
     }
 }

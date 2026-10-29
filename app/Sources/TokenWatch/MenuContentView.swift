@@ -521,6 +521,7 @@ struct SettingsView: View {
             resetRevealSection
             nearingResetRevealSection
         }
+        .onChange(of: appLanguageRaw) { _, _ in store.synchronizeBankedResetReminders() }
         .formStyle(.grouped)
         .onAppear {
             var ticks: [ProviderKind: Bool] = [:]
@@ -529,6 +530,7 @@ struct SettingsView: View {
                 ticks[provider] = MenuBarVisibility.isTicked(provider)
                 longWindowTicks[provider] = MenuBarVisibility.showsLongWindowOnly(provider)
             }
+            store.synchronizeBankedResetReminders()
             menuBarTicks = ticks
             longWindowOnlyTicks = longWindowTicks
         }
@@ -685,6 +687,7 @@ struct SettingsView: View {
 
     private var bankedResetsSection: some View {
         Section(loc.bankedResets) {
+            BankedResetReminderSettingsView(coordinator: store.bankedResetReminders, loc: loc)
             Toggle(loc.bankedResetAutoEnable, isOn: $store.bankedResetAutoApplyEnabled)
                 .toggleStyle(.switch).controlSize(.small)
             Stepper(String(format: loc.bankedResetLead, store.bankedResetAutoApplyLeadMinutes),
@@ -829,6 +832,20 @@ private struct ThresholdField: View {
                 .frame(width: 64)
             Text(suffix)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct BankedResetReminderSettingsView: View {
+    @ObservedObject var coordinator: BankedResetReminderCoordinator
+    let loc: Loc
+
+    var body: some View {
+        Toggle(loc.bankedResetRemindersEnable, isOn: $coordinator.enabled)
+            .toggleStyle(.switch).controlSize(.small)
+        Text(loc.bankedResetRemindersCaption).font(.caption).foregroundStyle(.secondary)
+        if coordinator.authorization == .denied {
+            Text(loc.bankedResetRemindersDenied).font(.caption).foregroundStyle(.secondary)
         }
     }
 }

@@ -40,22 +40,35 @@ Each provider appears once its local credentials are found:
 
 Approve the Keychain prompt if macOS asks — that's Token Watch reading your existing CLI credentials. Some quota endpoints are undocumented and may change without notice. Alibaba Cloud exposes no usage API for Token Plan keys, so Token Watch reads the console's internal gateway with your console session; the plan key alone is not enough.
 
+## Banked resets
+
+Claude and Codex can grant account reset credits that you redeem when you choose before they expire. Token Watch lists them on each provider's card with their expiry, and **Apply** redeems one after a confirmation. Redeeming cannot be undone: it resets the provider's current usage windows. Codex also moves the weekly reset date to about seven days later.
+
+- Codex credits come from `codex app-server` (`account/rateLimits/read`) and are redeemed with `account/rateLimitResetCredit/consume`, the same path as the CLI's `/usage` → Redeem.
+- Claude grants come from the Claude Code OAuth usage endpoint (`cedar_ember`) and are redeemed through `reset_rate_limits`, the same path as Claude Code's `/limit-reset`. Some Claude offers can only be redeemed on claude.ai or Claude Desktop; Token Watch lists them with that note and disables **Apply**.
+
+**Options → Banked resets → Apply banked resets automatically before they expire** (off by default) redeems a usable reset N minutes before it expires (default 5) while Token Watch is open. It applies only the reset that is about to expire, refreshes first to confirm it is still usable, and reuses one idempotency key per reset so a retry cannot spend a second credit. If the provider reports nothing to reset, the credit is kept and expires unused. Enable automatic apply in only one place: either the Mac app or the Python server.
+
+The Mac and iPhone apps send notifications 24 hours, 12 hours, 4 hours, 1 hour, and 15 minutes before a banked reset expires (on by default; **Options → Banked resets** on the Mac, the provider's banked-reset section on the iPhone). Reminders are rescheduled after each reading, so a redeemed or withdrawn reset stops reminding. The iPhone schedules them locally from its last reading, so they arrive while the app is closed.
+
 ## Local API
 
 Options → Local API serves the app's current readings as JSON on `127.0.0.1` (default port 8037), off by default:
 
 - `GET /usage` returns every provider keyed by `claude`, `codex`, `gemini`, `zai`, `muse`, `alicloud`, and `commandcode`, plus `last_updated`.
-- `GET /usage/<provider>` returns one provider: `five_hour`, `weekly`, `model_windows`, `detail`, `pace_delta`, and `updated_at`.
+- `GET /usage/<provider>` returns one provider: `five_hour`, `weekly`, `model_windows`, `banked_resets`, `detail`, `pace_delta`, and `updated_at`.
 - `GET /health` returns `{"status": "ok"}`.
 - `POST /refresh` requests fresh readings from every provider, waits for collection to finish, and returns the same payload as `GET /usage`. Concurrent refresh requests share collection work.
+- `GET /resets` lists every banked reset with its provider, `title`, `granted_at`, `expires_at`, `status`, `usable`, `remaining`, and `note`, soonest expiry first, plus the `auto_apply` setting. `GET /usage` also carries the setting as `banked_reset_auto_apply`.
+- `POST /resets/<provider>/<id>/apply` redeems one listed, usable reset, refreshes that provider, and returns `outcome`, `applied`, `message`, and the refreshed `usage`. It returns 404 for a reset that is no longer listed, 409 when it cannot be applied now, and 502 when the provider could not confirm the result. Clients must confirm with the user before calling it.
 
 ### iPhone companion
 
-The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, and pacing. It reads the Mac app directly every minute while open and retains its last reading offline. Pull down or tap refresh to request a fresh collection on the Mac; the progress indicator stays active until the Mac responds. Provider credentials stay on the Mac.
+The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, pacing, and banked resets. Tap a provider to see its banked resets with their expiry and apply one after a confirmation; the Mac performs the redemption. It reads the Mac app directly every minute while open and retains its last reading offline. Pull down or tap refresh to request a fresh collection on the Mac; the progress indicator stays active until the Mac responds. Provider credentials stay on the Mac.
 
 The saved connection recovers automatically on foreground and network changes. Failed reads retry after 5, 10, 20, then 30 seconds while open, without discarding pairing or cached readings. Background checks run when iOS grants time; the app does not require a continuously open socket.
 
-In the Mac's **Options → Local API**, enable the API and **Share with iPhone**. In the iPhone app, tap the sliders button, enter the displayed Mac address, and paste **Copy pairing key**. Keep Token Watch running and both devices on the same trusted network. LAN sharing uses HTTP and requires the pairing key; local loopback requests keep working without it. Regenerating the key disconnects previously paired clients until their key is updated.
+In the Mac's **Options → Local API**, enable the API and **Share with iPhone**. In the iPhone app, tap the cog button, enter the displayed Mac address, and paste **Copy pairing key**. Keep Token Watch running and both devices on the same trusted network. LAN sharing uses HTTP and requires the pairing key; local loopback requests keep working without it. Regenerating the key disconnects previously paired clients until their key is updated.
 
 The reset panel uses the public [Codex Resets API](https://codex-resets.com/api/docs), the same source as Sandford's `com.developer-tools.codex-resets` watcher. The phone checks directly over HTTPS, including away from the Mac. An announced regular reset stays pending until execution evidence arrives; an elapsed deadline, missing schedule, forecast, or banked credit does not count as a completed reset. Estimates are separate from your account's normal weekly reset.
 

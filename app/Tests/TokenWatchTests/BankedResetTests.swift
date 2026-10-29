@@ -285,6 +285,21 @@ private actor ResetApplierSpy: BankedResetApplying {
         #expect(store.bankedResetResultRows.isEmpty && store.bankedResetMessages.isEmpty)
     }
 
+    @Test func failedReadsKeepLastKnownResets() async throws {
+        let suite = "failed-read-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let failure = makeSnapshot(.claude, fiveHourMessage: "Claude usage endpoint returned HTTP 500.")
+        let store = UsageStore(claudeProbe: CountingProbe(snapshot: failure, counter: CallCounter()),
+            codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: CallCounter()),
+            userDefaults: defaults, startRefreshLoop: false)
+        store.claude = snapshot(resets: [.init(id: "kept", title: "Full", usable: true)])
+        await store.refresh(.claude)
+        await store.refresh(.claude)
+        #expect(store.claude.fiveHour.usedPercentage == nil)
+        #expect(store.claude.bankedResets.map(\.id) == ["kept"])
+    }
+
     @Test func autoApplyOnlyDueResetOnceAndRetryAfterSixtySeconds() async throws {
         let suite = "auto-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
