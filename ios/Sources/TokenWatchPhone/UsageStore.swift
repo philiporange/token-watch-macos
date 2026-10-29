@@ -15,6 +15,11 @@ final class UsageStore: ObservableObject {
     @Published private(set) var isRequestingFreshReadings = false
     @Published private(set) var lastRemoteRefresh: Date?
     @Published private(set) var applyingResetIDs: Set<String> = []
+    @Published private(set) var history: [UsageHistoryRange: UsageHistory] = [:]
+    @Published private(set) var historyLoading: Set<UsageHistoryRange> = []
+    @Published private(set) var historyErrors: [UsageHistoryRange: String] = [:]
+    private var visibleHistory: [UUID: UsageHistoryRange] = [:]
+    private var historyRequests: [UsageHistoryRange: UUID] = [:]
     let bankedReminders: BankedResetReminders
 
     private struct CachedReading: Codable {
@@ -86,6 +91,7 @@ final class UsageStore: ObservableObject {
                 await accept(reading, data: data, for: requestedConnection)
                 retrySchedule.recordSuccess()
                 if force { lastRemoteRefresh = .now }
+                await refreshVisibleHistory()
             } catch {
                 guard connection == requestedConnection else { return }
                 isReachable = false
@@ -144,9 +150,56 @@ final class UsageStore: ObservableObject {
         let (reading, data) = try await UsageClient.fetch(candidate)
         try Task.checkCancellation()
         try ConnectionKeychain.save(candidate)
+        if connection != candidate {
+            history = [:]
+            historyErrors = [:]
+            historyRequests = [:]
+            historyLoading = []
+        }
         connection = candidate
         retrySchedule.recordSuccess()
         await accept(reading, data: data, for: candidate)
+        await refreshVisibleHistory()
+    }
+
+    func showHistory(_ id: UUID, range: UsageHistoryRange) {
+        visibleHistory[id] = range
+    }
+
+    func hideHistory(_ id: UUID) {
+        visibleHistory.removeValue(forKey: id)
+    }
+
+    func refreshHistory(range: UsageHistoryRange) async {
+        guard let requestedConnection = connection else {
+            historyErrors[range] = "Connect to your Mac to load history."
+            return
+        }
+        guard !Task.isCancelled else { return }
+        let id = UUID()
+        historyRequests[range] = id
+        historyLoading.insert(range)
+        defer {
+            if historyRequests[range] == id {
+                historyRequests.removeValue(forKey: range)
+                historyLoading.remove(range)
+            }
+        }
+        do {
+            let result = try await UsageClient.history(requestedConnection, range: range)
+            guard connection == requestedConnection, historyRequests[range] == id else { return }
+            history[range] = result
+            historyErrors.removeValue(forKey: range)
+        } catch {
+            guard connection == requestedConnection, historyRequests[range] == id else { return }
+            if !Task.isCancelled { historyErrors[range] = friendlyError(error) }
+        }
+    }
+
+    private func refreshVisibleHistory() async {
+        for range in Set(visibleHistory.values) {
+            await refreshHistory(range: range)
+        }
     }
 
     func startMonitoring() {

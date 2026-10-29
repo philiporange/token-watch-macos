@@ -5,6 +5,7 @@ struct ProviderDetailView: View {
     let initialProvider: ProviderUsage
     @ObservedObject var store: UsageStore
     @ObservedObject var reminders: BankedResetReminders
+    @State private var historyRange: UsageHistoryRange = .week
     @State private var pendingReset: BankedReset?
     @State private var resultMessages: [String: String] = [:]
 
@@ -58,6 +59,12 @@ struct ProviderDetailView: View {
                     }
                     if !provider.bankedResets.isEmpty || !resultMessages.isEmpty {
                         bankedResets
+                    }
+                    VStack(alignment: .leading, spacing: 18) {
+                        Eyebrow(text: "History", color: .white)
+                        HistoryRangePicker(selection: $historyRange, ranges: [.day, .week, .month])
+                        HistoryContentView(store: store, range: historyRange,
+                                           provider: MacConnection.routeKey(for: provider.provider))
                     }
                     if let updated = provider.updatedAt {
                         VStack(alignment: .leading, spacing: 7) {

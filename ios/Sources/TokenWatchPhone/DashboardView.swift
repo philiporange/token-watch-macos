@@ -12,6 +12,7 @@ struct DashboardView: View {
     @ObservedObject var notifications: ResetNotifications
     @State private var period = UsagePeriod.longRange
     @State private var showsConnection = false
+    @State private var showsHistory = false
     @State private var selectedProvider: ProviderUsage?
 
     var body: some View {
@@ -55,6 +56,7 @@ struct DashboardView: View {
         .sheet(isPresented: $notifications.openDetails, onDismiss: openBankedProvider) {
             ResetDetailsView(store: resets, notifications: notifications)
         }
+        .sheet(isPresented: $showsHistory, onDismiss: openBankedProvider) { UsageHistoryScreen(store: store) }
         .sheet(isPresented: $showsConnection, onDismiss: openBankedProvider) { ConnectionView(store: store) }
         .onChange(of: notifications.openBankedProvider) { _, _ in openBankedProvider() }
         .onChange(of: store.snapshot) { _, _ in openBankedProvider() }
@@ -67,7 +69,8 @@ struct DashboardView: View {
     private func openBankedProvider() {
         guard let route = notifications.openBankedProvider,
               let provider = store.snapshot?.providers.first(where: { MacConnection.routeKey(for: $0.provider) == route }) else { return }
-        if notifications.openDetails || showsConnection {
+        if notifications.openDetails || showsConnection || showsHistory {
+            showsHistory = false
             notifications.openDetails = false
             showsConnection = false
             return
@@ -80,6 +83,7 @@ struct DashboardView: View {
         HStack(spacing: 10) {
             Text("Token Watch")
                 .font(.system(size: 30, weight: .bold)).tracking(-1.5)
+                .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             Button { notifications.openDetails = true } label: {
@@ -90,6 +94,15 @@ struct DashboardView: View {
             }
             .accessibilityLabel("Reset alerts")
             .accessibilityIdentifier("reset-alerts")
+            Button { showsHistory = true } label: {
+                Image(systemName: "chart.xyaxis.line")
+                    .font(.system(size: 19, weight: .medium))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Usage history")
+            .accessibilityIdentifier("history-button")
             Button { showsConnection = true } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 19, weight: .medium))

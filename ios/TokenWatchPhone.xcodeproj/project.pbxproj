@@ -13,6 +13,7 @@
 		5455E0B8506C9324F4532B0B /* ResetNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41BCD78729075E6AFCB1F264 /* ResetNotifications.swift */; };
 		66F784679E383BEE083431AB /* ProviderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DCBD75B6C6059753DCC831 /* ProviderDetailView.swift */; };
 		6D99408850E22EDC555FF276 /* ConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9978315D20996562DA448649 /* ConnectionView.swift */; };
+		760EA01CDA7B819B0496D820 /* UsageHistoryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FF0906534695C991728CBB /* UsageHistoryViews.swift */; };
 		77A885E24C4C5F4412BA1264 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79D2874B4075AABF1D69CC75 /* Design.swift */; };
 		8F529A2A3FFAC4D6E4A9AC47 /* PhoneJourneyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC9AA9637591CF725ADC431D /* PhoneJourneyTests.swift */; };
 		C204C24A11FBD5C627B5085E /* CodexResetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AA28D77A8F0A9C05ED2873C /* CodexResetStore.swift */; };
@@ -46,6 +47,7 @@
 		B5B988F46A4EE5F3C06BFAE1 /* UsageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageStore.swift; sourceTree = "<group>"; };
 		C75FD62DD3EB3C0512D1318B /* TokenWatchPhoneUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TokenWatchPhoneUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D475798DD770A2E7FBAD32BD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E6FF0906534695C991728CBB /* UsageHistoryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistoryViews.swift; sourceTree = "<group>"; };
 		E7DCBD75B6C6059753DCC831 /* ProviderDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderDetailView.swift; sourceTree = "<group>"; };
 		FC9AA9637591CF725ADC431D /* PhoneJourneyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneJourneyTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -99,6 +101,7 @@
 				9C00843FF942F02DDC6C06B8 /* ResetDetailsView.swift */,
 				41BCD78729075E6AFCB1F264 /* ResetNotifications.swift */,
 				60365C1A3B643D02FA77B4A9 /* TokenWatchApp.swift */,
+				E6FF0906534695C991728CBB /* UsageHistoryViews.swift */,
 				B5B988F46A4EE5F3C06BFAE1 /* UsageStore.swift */,
 			);
 			name = TokenWatchPhone;
@@ -256,6 +259,7 @@
 				1F338F6914022A0EDD4E2404 /* ResetDetailsView.swift in Sources */,
 				5455E0B8506C9324F4532B0B /* ResetNotifications.swift in Sources */,
 				F1DC98B66095A0F37F497627 /* TokenWatchApp.swift in Sources */,
+				760EA01CDA7B819B0496D820 /* UsageHistoryViews.swift in Sources */,
 				F56AC56A1CDF1CF99C839400 /* UsageStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

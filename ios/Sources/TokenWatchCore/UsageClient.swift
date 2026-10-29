@@ -50,6 +50,19 @@ public struct MacConnection: Codable, Equatable, Sendable {
         return request
     }
 
+    public func historyRequest(range: UsageHistoryRange, provider: String? = nil) throws -> URLRequest {
+        guard var parts = URLComponents(string: address) else { throw ConnectionError.invalidAddress }
+        parts.path = "/history"
+        parts.queryItems = [URLQueryItem(name: "range", value: range.rawValue)]
+        if let provider { parts.queryItems?.append(URLQueryItem(name: "provider", value: provider)) }
+        guard let url = parts.url else { throw ConnectionError.invalidAddress }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if !token.isEmpty { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        return request
+    }
+
     public static func routeKey(for providerName: String) -> String {
         providerName.lowercased().filter { $0.isLetter || $0.isNumber }
     }
@@ -77,6 +90,21 @@ public enum UsageClient {
     public static func fetch(_ connection: MacConnection, refresh: Bool = false, session: URLSession = .shared) async throws -> (UsageSnapshot, Data) {
         let (data, response) = try await session.data(for: connection.request(refresh: refresh))
         return (try decode(data, response: response), data)
+    }
+
+    public static func history(_ connection: MacConnection, range: UsageHistoryRange, provider: String? = nil,
+                               session: URLSession = .shared) async throws -> UsageHistory {
+        let request = try connection.historyRequest(range: range, provider: provider)
+        let (data, response) = try await session.data(for: request)
+        return try decodeHistory(data, response: response)
+    }
+
+    public static func decodeHistory(_ data: Data, response: URLResponse) throws -> UsageHistory {
+        guard let response = response as? HTTPURLResponse else { throw ConnectionError.badResponse }
+        if response.statusCode == 401 || response.statusCode == 403 { throw ConnectionError.rejectedKey }
+        guard response.statusCode == 200 else { throw ConnectionError.server(response.statusCode) }
+        do { return try UsageHistory.decode(data) }
+        catch { throw ConnectionError.badResponse }
     }
 
     public static func applyReset(_ connection: MacConnection, providerRouteKey: String, resetID: String,
