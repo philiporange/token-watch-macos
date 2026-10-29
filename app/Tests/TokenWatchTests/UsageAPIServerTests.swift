@@ -41,6 +41,45 @@ struct UsageAPIServerTests {
         try #require(try JSONSerialization.jsonObject(with: response.body) as? [String: Any])
     }
 
+    @Test func historyRoutesValidateAndEncodePassedResponse() throws {
+        let router = router()
+        let response = UsageHistory.response(series: [], range: .week, now: Date(timeIntervalSince1970: 1_790_000_000))
+        let result = router.respond(method: "GET", path: "/history", historyResponse: response)
+        #expect(result.status == 200)
+        #expect(result.body == (try UsageAPIRouter.encoder.encode(response)))
+        #expect(router.respond(method: "GET", path: "/history?range=bad").status == 400)
+        #expect(router.respond(method: "GET", path: "/history?range=").statusLine == "400 Bad Request")
+        #expect(router.respond(method: "GET", path: "/history?provider=unknown").status == 404)
+        #expect(router.respond(method: "POST", path: "/history", historyResponse: response).status == 405)
+        #expect(router.respond(method: "HEAD", path: "/history", historyResponse: response).status == 405)
+        #expect(router.respond(method: "GET", path: "/history?range=all&provider=claude", historyResponse: response).status == 200)
+        #expect(UsageAPIRouter.historyQuery("/history").range == .week)
+        #expect(String(decoding: router.respond(method: "GET", path: "/missing").body, as: UTF8.self).contains("/history"))
+    }
+
+    @Test @MainActor func historyServerReadsStorageWithoutFetching() async throws {
+        let claudeCalls = CallCounter(), codexCalls = CallCounter()
+        let store = offlineStore(
+            claudeProbe: CountingProbe(snapshot: makeSnapshot(.claude), counter: claudeCalls),
+            codexProbe: CountingProbe(snapshot: makeSnapshot(.codex), counter: codexCalls))
+        try await store.historyStore.record(makeSnapshot(.claude, weeklyUsed: 42))
+        try await store.historyStore.record(makeSnapshot(.codex, fiveHourUsed: 10))
+        let server = UsageAPIServer(store: store, followSettings: false)
+        let peer = NWEndpoint.hostPort(host: "127.0.0.1", port: 12345)
+        let response = await server.respond(to: "GET /history?range=all&provider=claude HTTP/1.1\r\nHost: test", peer: peer)
+        #expect(response.status == 200)
+        let series = try #require(try json(response)["series"] as? [[String: Any]])
+        #expect(series.count == 1)
+        #expect(series.first?["provider"] as? String == "claude")
+        #expect(await claudeCalls.count == 0)
+        #expect(await codexCalls.count == 0)
+        #expect(await server.respond(to: "GET /history?range=invalid HTTP/1.1", peer: peer).status == 400)
+        #expect(await server.respond(to: "GET /history?provider HTTP/1.1", peer: peer).status == 404)
+        #expect(await server.respond(to: "GET /history?provider=unknown HTTP/1.1", peer: peer).status == 404)
+        #expect(await server.respond(to: "POST /history HTTP/1.1", peer: peer).status == 405)
+        #expect(server.state == .stopped)
+    }
+
     @Test func routesHealthBulkAndSingleProvider() throws {
         let router = router()
 

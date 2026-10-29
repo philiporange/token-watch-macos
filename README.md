@@ -51,6 +51,19 @@ Claude and Codex can grant account reset credits that you redeem when you choose
 
 The Mac and iPhone apps send notifications 24 hours, 12 hours, 4 hours, 1 hour, and 15 minutes before a banked reset expires (on by default; **Options → Banked resets** on the Mac, the provider's banked-reset section on the iPhone). Reminders are rescheduled after each reading, so a redeemed or withdrawn reset stops reminding. The iPhone schedules them locally from its last reading, so they arrive while the app is closed.
 
+## Usage history
+
+Token Watch logs every tracked window: each provider's 5-hour and weekly (or monthly) limits and its model-specific limits. It saves a point for a window once an hour, or sooner when usage has moved by 1 percentage point since the last saved point. Only fresh readings are saved; a failed or rate-limited read keeps no point. The log is a local SQLite database at `~/Library/Application Support/TokenWatch/usage-history.sqlite3` and is kept indefinitely.
+
+The chart button in the menu opens **Usage History**: one chart per window over the last 24 hours, 7 days, 30 days, 90 days, year, or all time, with the 100 % limit and the next reset marked. Each chart projects usage to the reset two ways:
+
+- **Average pace**: usage so far divided by the time elapsed in the current window.
+- **Trend**: a least-squares fit over the most recent hour (5-hour windows), day (weekly and model windows), or three days (monthly windows).
+
+Each projection gives the expected usage at the reset and, if it would run out first, when it reaches 100 %.
+
+The Python server in `server/` keeps its own log, reading every 5 minutes, and serves the same charts in the browser at `/dashboard/history` (see `server/README.md`).
+
 ## Local API
 
 Options → Local API serves the app's current readings as JSON on `127.0.0.1` (default port 8037), off by default:
@@ -61,10 +74,11 @@ Options → Local API serves the app's current readings as JSON on `127.0.0.1` (
 - `POST /refresh` requests fresh readings from every provider, waits for collection to finish, and returns the same payload as `GET /usage`. Concurrent refresh requests share collection work.
 - `GET /resets` lists every banked reset with its provider, `title`, `granted_at`, `expires_at`, `status`, `usable`, `remaining`, and `note`, soonest expiry first, plus the `auto_apply` setting. `GET /usage` also carries the setting as `banked_reset_auto_apply`.
 - `POST /resets/<provider>/<id>/apply` redeems one listed, usable reset, refreshes that provider, and returns `outcome`, `applied`, `message`, and the refreshed `usage`. It returns 404 for a reset that is no longer listed, 409 when it cannot be applied now, and 502 when the provider could not confirm the result. Clients must confirm with the user before calling it.
+- `GET /history?range=7d&provider=claude` returns the logged series for `24h`, `7d` (default), `30d`, `90d`, `365d`, or `all`, optionally for one provider. Each series has its `id` (such as `claude.weekly` or `claude.model:opus`), `label`, `kind`, saved `points` (`t`, `used`, `resets_at`), the `current` reading, and `projections` (`average` and `trend`, each with `rate_per_hour`, `at_reset`, `limit_at`, and the `from`/`to` points of the projected line).
 
 ### iPhone companion
 
-The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, pacing, and banked resets. Tap a provider to see its banked resets with their expiry and apply one after a confirmation; the Mac performs the redemption. It reads the Mac app directly every minute while open and retains its last reading offline. Pull down or tap refresh to request a fresh collection on the Mac; the progress indicator stays active until the Mac responds. Provider credentials stay on the Mac.
+The native SwiftUI client in `ios/` shows session and longer-term limits, reset times, model allowances, pacing, and banked resets. Tap a provider to see its usage history charts and its banked resets with their expiry, and apply a reset after a confirmation; the Mac performs the redemption. The chart button opens the history of every provider, with projections, from the Mac's log. It reads the Mac app directly every minute while open and retains its last reading offline. Pull down or tap refresh to request a fresh collection on the Mac; the progress indicator stays active until the Mac responds. Provider credentials stay on the Mac.
 
 The saved connection recovers automatically on foreground and network changes. Failed reads retry after 5, 10, 20, then 30 seconds while open, without discarding pairing or cached readings. Background checks run when iOS grants time; the app does not require a continuously open socket.
 

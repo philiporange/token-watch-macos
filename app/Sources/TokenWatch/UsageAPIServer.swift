@@ -194,6 +194,7 @@ struct UsageAPIResponse: Equatable {
     var statusLine: String {
         switch status {
         case 200: return "200 OK"
+        case 400: return "400 Bad Request"
         case 401: return "401 Unauthorized"
         case 404: return "404 Not Found"
         case 405: return "405 Method Not Allowed"
@@ -235,9 +236,26 @@ struct UsageAPIRouter {
         return (parts[1], id)
     }
 
-    func respond(method: String, path: String, applyResult: BankedResetApplyResult? = nil) -> UsageAPIResponse {
+    static func historyQuery(_ path: String) -> (range: UsageHistoryRange?, provider: String?) {
+        let query = URLComponents(string: path)?.queryItems ?? []
+        let range = query.first { $0.name == "range" }.map { $0.value ?? "" } ?? "7d"
+        return (UsageHistoryRange(rawValue: range), query.first { $0.name == "provider" }.map { $0.value ?? "" })
+    }
+
+    func respond(method: String, path: String, applyResult: BankedResetApplyResult? = nil,
+                 historyResponse: UsageHistoryResponse? = nil) -> UsageAPIResponse {
         let route = path.split(separator: "?", maxSplits: 1).first.map(String.init) ?? path
         let segments = route.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        if route == "/history" {
+            guard method == "GET" else { return error(405, "Method not allowed.") }
+            let query = Self.historyQuery(path)
+            guard query.range != nil else { return error(400, "Invalid history range.") }
+            if let provider = query.provider, !ProviderKind.allCases.contains(where: { $0.routeKey == provider }) {
+                return error(404, "Unknown provider.")
+            }
+            guard let historyResponse else { return error(500, "History response missing.") }
+            return json(historyResponse)
+        }
         if let apply = Self.applyRoute(path) {
             guard let provider = ProviderKind.from(routeKey: apply.provider) else { return error(404, "Unknown provider.") }
             guard method == "POST" else { return error(405, "Method not allowed.") }
@@ -277,7 +295,7 @@ struct UsageAPIRouter {
             }
             return json(providers(provider))
         }
-        return error(404, "Not found. Try /health, /usage, /usage/<provider>, or POST /refresh.")
+        return error(404, "Not found. Try /health, /usage, /usage/<provider>, /history, or POST /refresh.")
     }
 
     private func bulkUsage() -> UsageAPIResponse {
@@ -557,6 +575,17 @@ final class UsageAPIServer: ObservableObject {
            let provider = ProviderKind.from(routeKey: route.provider) {
             let result = await store.applyBankedReset(provider: provider, id: route.id)
             return router.respond(method: request.method, path: request.path, applyResult: result)
+        }
+        if request.method == "GET", request.path.split(separator: "?", maxSplits: 1).first == "/history" {
+            let query = UsageAPIRouter.historyQuery(request.path)
+            if let range = query.range,
+               query.provider == nil || ProviderKind.allCases.contains(where: { $0.routeKey == query.provider }) {
+                let response = await store.history(range: range, provider: query.provider.flatMap(ProviderKind.from(routeKey:)))
+                if store.historyError != nil {
+                    return UsageAPIResponse(status: 500, body: Data("{\"error\":\"History storage unavailable.\"}".utf8))
+                }
+                return router.respond(method: request.method, path: request.path, historyResponse: response)
+            }
         }
         return router.respond(method: request.method, path: request.path)
     }

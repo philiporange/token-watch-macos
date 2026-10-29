@@ -1189,3 +1189,61 @@ extension Loc {
         }
     }
 }
+
+extension Loc {
+    private func historyText(_ values: [String]) -> String {
+        values[AppLanguage.allCases.firstIndex(of: lang)!]
+    }
+    var usageHistory: String { historyText(["Usage History", "Historial de uso", "Historique d’utilisation", "Nutzungsverlauf", "使用履歴", "사용량 기록", "用量历史"]) }
+    var historyAll: String { historyText(["All", "Todos", "Tout", "Alle", "すべて", "전체", "全部"]) }
+    var historyProvider: String { historyText(["Provider", "Proveedor", "Fournisseur", "Anbieter", "プロバイダー", "제공업체", "提供商"]) }
+    var historyRange: String { historyText(["Range", "Período", "Période", "Zeitraum", "期間", "기간", "范围"]) }
+    var historyEmpty: String { historyText([
+        "History builds up as Token Watch reads usage: a point every hour, or whenever usage moves by 1 %",
+        "El historial crece cuando Token Watch lee el uso: un punto cada hora o cuando el uso cambia un 1 %",
+        "L’historique se construit à chaque lecture : un point par heure ou à chaque variation de 1 %",
+        "Der Verlauf wächst bei jeder Messung: ein Punkt pro Stunde oder bei einer Änderung um 1 %",
+        "Token Watchの読み取りで履歴が蓄積されます。1時間ごと、または使用量が1 %変化するたびに記録します",
+        "Token Watch가 사용량을 읽을 때 기록됩니다. 매시간 또는 사용량이 1 % 변할 때마다 점이 추가됩니다",
+        "Token Watch 读取用量时积累历史：每小时或用量变化 1 % 时记录一个点"
+    ]) }
+    var historyNoReset: String { historyText(["No reset time", "Sin hora de reinicio", "Aucune date de réinitialisation", "Keine Rücksetzzeit", "リセット時刻なし", "초기화 시간 없음", "无重置时间"]) }
+    var historyNotEnough: String { historyText(["Not enough history yet", "Aún no hay suficiente historial", "Historique encore insuffisant", "Noch nicht genug Verlauf", "履歴がまだ不足しています", "아직 기록이 부족합니다", "历史记录尚不足"]) }
+    var historyUnavailable: String { historyText(["History storage unavailable", "Almacenamiento del historial no disponible", "Stockage de l’historique indisponible", "Verlaufsspeicher nicht verfügbar", "履歴ストレージを利用できません", "기록 저장소를 사용할 수 없습니다", "历史存储不可用"]) }
+    var historyAverage: String { historyText(["Average pace", "Ritmo medio", "Rythme moyen", "Durchschnitt", "平均ペース", "평균 속도", "平均速度"]) }
+    var historyReset: String { historyText(["Reset", "Reinicio", "Réinitialisation", "Zurücksetzung", "リセット", "초기화", "重置"]) }
+    var historyLimit: String { historyText(["Limit", "Límite", "Limite", "Limit", "上限", "한도", "上限"]) }
+    var historyTime: String { historyText(["Time", "Hora", "Heure", "Zeit", "時刻", "시간", "时间"]) }
+    var historyValue: String { historyText(["Used (%)", "Usado (%)", "Utilisé (%)", "Verbraucht (%)", "使用率 (%)", "사용량 (%)", "已用 (%)"]) }
+    func historyRangeLabel(_ range: UsageHistoryRange) -> String {
+        switch range {
+        case .all: historyAll
+        case .day: historyText(["24h", "24 h", "24 h", "24 Std.", "24時間", "24시간", "24小时"])
+        case .week: historyText(["7d", "7 d", "7 j", "7 T.", "7日", "7일", "7天"])
+        case .month: historyText(["30d", "30 d", "30 j", "30 T.", "30日", "30일", "30天"])
+        case .quarter: historyText(["90d", "90 d", "90 j", "90 T.", "90日", "90일", "90天"])
+        case .year: historyText(["1y", "1 a", "1 an", "1 J.", "1年", "1년", "1年"])
+        }
+    }
+    func historyLabel(_ series: UsageHistorySeries) -> String {
+        switch series.window {
+        case "five_hour": historyText(["5-hour", "5 horas", "5 heures", "5 Stunden", "5時間", "5시간", "5小时"])
+        case "weekly" where series.kind == "Month": historyText(["Monthly", "Mensual", "Mensuel", "Monatlich", "月間", "월간", "每月"])
+        case "weekly": historyText(["Weekly", "Semanal", "Hebdomadaire", "Wöchentlich", "週間", "주간", "每周"])
+        default: series.label
+        }
+    }
+    func historyTrend(kind: String) -> String {
+        let hours = Int(UsageHistory.durations(kind: kind).lookback)
+        let duration = hours == 72 ? historyText(["3 d", "3 d", "3 j", "3 T.", "3日", "3일", "3天"])
+            : historyText(["\(hours) h", "\(hours) h", "\(hours) h", "\(hours) Std.", "\(hours)時間", "\(hours)시간", "\(hours)小时"])
+        return historyText(["\(duration) trend", "Tendencia de \(duration)", "Tendance sur \(duration)", "\(duration)-Trend", "\(duration)の傾向", "\(duration) 추세", "\(duration)趋势"])
+    }
+    func historyProjection(rate: String, value: String, date: String, reachesLimit: Bool) -> String {
+        let pace = historyText(["\(rate)%/h", "\(rate)%/h", "\(rate)%/h", "\(rate)%/Std.", "\(rate)%/時", "\(rate)%/시간", "\(rate)%/小时"])
+        let outcome = reachesLimit
+            ? historyText(["reaches 100% \(date)", "alcanza el 100% \(date)", "atteint 100% le \(date)", "erreicht 100% am \(date)", "\(date)に100%到達", "\(date)에 100% 도달", "于\(date)达到100%"])
+            : historyText(["\(value)% at reset \(date)", "\(value)% al reiniciar \(date)", "\(value)% à la réinitialisation \(date)", "\(value)% bei Zurücksetzung \(date)", "\(date)のリセット時に\(value)%", "\(date) 초기화 시 \(value)%", "\(date)重置时\(value)%"])
+        return pace + " · " + outcome
+    }
+}

@@ -21,6 +21,7 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     private let store: UsageStore
     private let openSettings: @MainActor () -> Void
+    private let openHistory: @MainActor () -> Void
     private let userDefaults: UserDefaults
     private let logger = Logger(subsystem: "com.tokenwatch.app", category: "StatusItem")
 
@@ -47,9 +48,10 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
 
     // MARK: - Init
 
-    init(store: UsageStore, openSettings: @escaping @MainActor () -> Void) {
+    init(store: UsageStore, openSettings: @escaping @MainActor () -> Void, openHistory: @escaping @MainActor () -> Void = {}) {
         self.store = store
         self.openSettings = openSettings
+        self.openHistory = openHistory
         self.userDefaults = .standard
         super.init()
 
@@ -92,6 +94,9 @@ final class StatusItemController: NSObject, NSMenuDelegate, NSPopoverDelegate {
             store: store,
             openSettings: { [openSettings] in
                 MainActor.assumeIsolated { openSettings() }
+            },
+            openHistory: { [openHistory] in
+                MainActor.assumeIsolated { openHistory() }
             }
         )
     }

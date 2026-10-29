@@ -50,13 +50,15 @@ private func countdownText(to date: Date, now: Date = Date()) -> String {
 struct MenuContentView: View {
     @ObservedObject var store: UsageStore
     let openSettings: () -> Void
+    let openHistory: () -> Void
 
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.english.rawValue
     @AppStorage("showGeminiOtherModels") private var showGeminiOtherModels = false
 
-    init(store: UsageStore, openSettings: @escaping () -> Void) {
+    init(store: UsageStore, openSettings: @escaping () -> Void, openHistory: @escaping () -> Void = {}) {
         self.store = store
         self.openSettings = openSettings
+        self.openHistory = openHistory
     }
 
     private var loc: Loc {
@@ -140,6 +142,14 @@ struct MenuContentView: View {
                 }
 
                 Spacer()
+
+                Button(action: openHistory) {
+                    Image(systemName: "chart.xyaxis.line")
+                }
+                .buttonStyle(.borderless)
+                .help(loc.usageHistory)
+                .accessibilityLabel(loc.usageHistory)
+                .pointingHandCursor()
 
                 Button {
                     openSettings()

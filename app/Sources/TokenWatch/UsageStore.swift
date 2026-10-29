@@ -117,6 +117,10 @@ final class UsageStore: ObservableObject {
     @Published var alicloud: ProviderSnapshot = .loading(.alicloud)
     @Published var commandCode: ProviderSnapshot = .loading(.commandCode)
 
+    let historyStore: UsageHistoryStore
+    @Published private(set) var historyError: String?
+    @Published private(set) var historyRevision = 0
+
     @Published var lastUpdated: Date?
     @Published var lastUpdatedByProvider: [ProviderKind: Date] = [:]
     @Published var refreshingProviders: Set<ProviderKind> = []
@@ -152,8 +156,10 @@ final class UsageStore: ObservableObject {
         userDefaults: UserDefaults = .standard,
         startRefreshLoop: Bool = true,
         resetAppliers: [ProviderKind: any BankedResetApplying] = [:],
-        notificationScheduler: (any BankedResetNotificationScheduling)? = nil
+        notificationScheduler: (any BankedResetNotificationScheduling)? = nil,
+        historyStore: UsageHistoryStore = UsageHistoryStore()
     ) {
+        self.historyStore = historyStore
         self.bankedResetReminders = BankedResetReminderCoordinator(
             scheduler: notificationScheduler ?? makeBankedResetNotificationScheduler(), userDefaults: userDefaults)
         self.resetAppliers = resetAppliers
@@ -195,7 +201,8 @@ final class UsageStore: ObservableObject {
             resetAppliers: [
                 .claude: ClaudeBankedResetApplier(probe: ClaudeProbe(), transport: ClaudeLiveResetTransport()),
                 .codex: CodexBankedResetApplier(transport: CodexLiveResetTransport())
-            ]
+            ],
+            historyStore: .live()
         )
     }
 
@@ -246,6 +253,13 @@ final class UsageStore: ObservableObject {
         let task = Task { @MainActor in
             let previous = snapshot(for: provider)
             let current = await probe(for: provider).fetch()
+            let readingTime = Date.now
+            if hasUsageData(in: current) {
+                do {
+                    try await historyStore.record(current, at: readingTime)
+                    historyError = nil
+                } catch { historyError = error.localizedDescription }
+            }
             let merged = merge(previous: previous, current: current, provider: provider)
             setSnapshot(merged, for: provider)
             let prefix = provider.routeKey + ":"
@@ -261,11 +275,28 @@ final class UsageStore: ObservableObject {
             let now = Date.now
             lastUpdatedByProvider[provider] = now
             lastUpdated = now
+            historyRevision += 1
             refreshingProviders.remove(provider)
         }
         providerRefreshTasks[provider] = task
         await task.value
         providerRefreshTasks[provider] = nil
+    }
+
+    func history(range: UsageHistoryRange = .week, provider: ProviderKind? = nil) async -> UsageHistoryResponse {
+        do {
+            let response = try await historyStore.history(range: range, provider: provider)
+            historyError = nil
+            return response
+        } catch {
+            historyError = error.localizedDescription
+            return UsageHistory.response(series: [], range: range, provider: provider)
+        }
+    }
+
+    func historyProviders() async -> [ProviderKind] {
+        let stored = (try? await historyStore.providers()) ?? []
+        return ProviderKind.allCases.filter { stored.contains($0.routeKey) }
     }
 
     func synchronizeBankedResetReminders() {

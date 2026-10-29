@@ -20,6 +20,7 @@ struct TokenWatchApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
+    private var historyWindowController: UsageHistoryWindowController?
     private var optionsWindowController: OptionsWindowController?
     private var usageAPIServer: UsageAPIServer?
 
@@ -44,7 +45,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItemController = StatusItemController(
             store: store,
-            openSettings: openSettings
+            openSettings: openSettings,
+            openHistory: { [weak self] in
+                guard let self else { return }
+                if self.historyWindowController == nil {
+                    self.historyWindowController = UsageHistoryWindowController(store: store)
+                }
+                self.historyWindowController?.show()
+            }
         )
         store.bankedResetReminders.onReminderClicked = { [weak self] in
             self?.statusItemController?.showPopover()
