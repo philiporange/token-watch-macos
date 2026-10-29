@@ -2,10 +2,12 @@
 
 The cache refreshes all providers concurrently or replaces one provider, then
 publishes an isolated response so GET requests never trigger provider calls or
-observe a partially completed refresh.
+observe a partially completed refresh. An optional isolated hook records fresh
+snapshots without making storage failures fail the refresh.
 """
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
@@ -16,6 +18,8 @@ from aipace_server.models import (
 )
 
 ProviderFetcher = Callable[[], Awaitable[ProviderSnapshot]]
+SnapshotHook = Callable[[str, ProviderSnapshot, datetime], None]
+logger = logging.getLogger(__name__)
 
 
 class UsageCache:
@@ -30,6 +34,7 @@ class UsageCache:
         fetch_muse: ProviderFetcher,
         fetch_alicloud: ProviderFetcher,
         fetch_commandcode: ProviderFetcher,
+        on_snapshot: SnapshotHook | None = None,
     ) -> None:
         self._fetch_claude = fetch_claude
         self._fetch_codex = fetch_codex
@@ -38,6 +43,7 @@ class UsageCache:
         self._fetch_muse = fetch_muse
         self._fetch_alicloud = fetch_alicloud
         self._fetch_commandcode = fetch_commandcode
+        self.on_snapshot = on_snapshot
         self._response: UsageResponse | None = None
         self._refresh_lock = asyncio.Lock()
 
@@ -70,6 +76,11 @@ class UsageCache:
                 self._fetch_commandcode(),
             )
             cached_at = datetime.now(timezone.utc)
+            for key, snapshot in zip(
+                ("claude", "codex", "gemini", "zai", "muse", "alicloud", "commandcode"),
+                (claude, codex, gemini, zai, muse, alicloud, commandcode),
+            ):
+                self._notify(key, snapshot, cached_at)
             self._response = UsageResponse(
                 claude=CachedProviderSnapshot(
                     **claude.model_dump(),
@@ -116,4 +127,12 @@ class UsageCache:
                 **snapshot.model_dump(), cached_at=datetime.now(timezone.utc)
             )
             self._response = self._response.model_copy(update={route_key: cached})
+            self._notify(route_key, snapshot, cached.cached_at)
             return cached.model_copy(deep=True)
+
+    def _notify(self, route_key: str, snapshot: ProviderSnapshot, cached_at: datetime) -> None:
+        if self.on_snapshot is not None:
+            try:
+                self.on_snapshot(route_key, snapshot.model_copy(deep=True), cached_at)
+            except Exception:
+                logger.exception("Snapshot hook failed for %s", route_key)

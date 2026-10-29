@@ -1,12 +1,13 @@
 """Load the FastAPI server settings from environment variables and ``.env``.
 
 Defaults expose the dashboard on port 8036 across available network interfaces.
-Environment variables configure opt-in reset application, the listener, and
-provider timeouts without changing the collection logic.
+Environment variables configure reset application, history storage, periodic
+collection, the listener, and provider timeouts.
 """
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -27,6 +28,10 @@ class Settings:
         1, min(60, int(os.environ.get("AIPACE_AUTO_APPLY_LEAD_MINUTES", "5")))
     )
     codex_timeout: float = float(os.environ.get("AIPACE_CODEX_TIMEOUT", "20"))
+    history_path: Path = Path(os.environ.get(
+        "AIPACE_HISTORY_PATH", "~/.local/share/aipace/usage-history.sqlite3"
+    )).expanduser()
+    refresh_minutes: float = max(0, float(os.environ.get("AIPACE_REFRESH_MINUTES", "5")))
 
 
 settings = Settings()

@@ -1,4 +1,4 @@
-"""Define provider usage, banked reset inventory, settings, and apply responses.
+"""Define provider usage, history, reset inventory, settings, and API responses.
 
 The models translate providers into the same five-hour, secondary, and
 model-scoped window structure used by the native AIPace application.
@@ -144,3 +144,61 @@ class HealthResponse(BaseModel):
     """A lightweight liveness response that does not contact any provider."""
 
     status: Literal["ok"] = "ok"
+
+
+HistoryRange = Literal["24h", "7d", "30d", "90d", "365d", "all"]
+
+
+class HistoryCoordinate(BaseModel):
+    """A timestamped usage percentage, including projection endpoints."""
+
+    t: datetime
+    used: float
+
+
+class HistoryPoint(HistoryCoordinate):
+    """A recorded reading with its optional quota reset time."""
+
+    resets_at: datetime | None = None
+
+
+class HistoryProjection(BaseModel):
+    """A pace estimate with uncapped reset usage and a capped plotted endpoint."""
+
+    method: Literal["average", "trend"]
+    rate_per_hour: float
+    at_reset: float
+    limit_at: datetime | None
+    from_: HistoryCoordinate = Field(alias="from")
+    to: HistoryCoordinate
+
+
+class HistorySeries(BaseModel):
+    """Stored points and the latest reading for one provider quota window."""
+
+    id: str
+    provider: str
+    provider_name: str
+    window: str
+    label: str
+    kind: str
+    points: list[HistoryPoint]
+    current: HistoryPoint
+    projections: list[HistoryProjection]
+
+
+class HistoryRules(BaseModel):
+    """Thresholds used to retain samples indefinitely."""
+
+    interval_minutes: int = 60
+    change_points: float = 1
+
+
+class HistoryResponse(BaseModel):
+    """A range-filtered view of usage history and independent pace estimates."""
+
+    generated_at: datetime
+    range: HistoryRange
+    since: datetime | None
+    rules: HistoryRules = Field(default_factory=HistoryRules)
+    series: list[HistorySeries]

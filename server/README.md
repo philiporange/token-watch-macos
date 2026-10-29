@@ -31,6 +31,11 @@ OpenAPI interface is available at `http://<server-address>:8036/docs`.
 - `GET /usage/alicloud` returns cached AliCloud Model Studio Token Plan usage.
 - `GET /usage/commandcode` returns cached Command Code coding-agent subscription usage.
 - `POST /refresh` fetches all providers concurrently and replaces the cache.
+- `GET /history?range=7d&provider=claude` returns stored usage history and pace
+  projections without upstream calls. `range` accepts `24h`, `7d` (default),
+  `30d`, `90d`, `365d`, or `all`; omit `provider` for all providers. Unknown
+  providers return 404 and invalid ranges return 422.
+- `GET /dashboard/history` displays history charts and per-provider pace tables.
 - `GET /resets` lists all cached banked resets, soonest expiry first (no expiry last),
   plus `auto_apply` settings.
 - `POST /resets/{provider}/{reset_id}/apply` applies one usable Claude or Codex reset.
@@ -78,10 +83,41 @@ itself cannot query usage.
 
 For Command Code, sign in with `command-code`. The server reads `~/.commandcode/auth.json` or `COMMANDCODE_API_KEY`. The billing endpoints (`https://api.commandcode.ai/alpha/billing/credits` and `.../subscriptions`) are the CLI's own undocumented endpoints.
 
-The cache is populated when the server starts. Every cached provider object
+The cache is populated when the server starts and refreshed every 5 minutes.
+`AIPACE_REFRESH_MINUTES` changes this interval; `0` disables periodic refresh.
+Every cached provider object
 includes `cached_at`. A provider failure is returned in that provider's window
 `message` fields so one unavailable CLI session does not hide the other
 provider's data.
+
+## Usage history
+
+Fresh successful quota readings are tracked separately for each provider's
+five-hour, weekly/monthly, and model windows. A sample is stored on the first
+reading, after at least 60 minutes since the last stored sample, or when usage
+changes by at least 1 percentage point from that sample (including drops).
+Null usage windows and failed readings do not change history. Every successful
+reading updates the in-memory current value, even when it does not need a sample.
+After a restart, current values fall back to the latest stored sample.
+
+`AIPACE_HISTORY_PATH` defaults to `~/.local/share/aipace/usage-history.sqlite3`
+and expands `~`. The SQLite database and parent directory are created on first
+use, and samples are retained indefinitely.
+
+The history response contains `generated_at`, `range`, `since`, recording
+`rules`, and ordered `series`. Each series has stored `points` in range, its
+latest `current` reading, and independent `average` and `trend` projections.
+Projections use all relevant stored samples regardless of the requested range.
+Average pace divides current usage by elapsed window time; trend uses a
+nonnegative least-squares slope over 1 hour (5-hour windows), 24 hours (weekly
+and model windows), or 3 days (monthly windows). Reset estimates are uncapped;
+projected chart lines stop at 100% when the estimate reaches the quota limit.
+Dates are UTC ISO-8601 strings rounded to whole seconds.
+
+Open **History** from the dashboard header for offline-compatible SVG charts,
+range and provider filters, reset markers, point tooltips, and pace summaries.
+The page reloads stored history every 5 minutes; reloading history does not
+contact providers.
 
 Listener and timeout defaults can be overridden with the variables shown in
 `.env.example`.

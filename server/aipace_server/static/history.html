@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f3ef">
+    <title>Usage history · Token Watch</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/history.css">
+    <script src="/static/history.js" defer></script>
+  </head>
+  <body>
+    <main class="shell history-shell">
+      <header class="topbar">
+        <a class="brand" href="/">← Current usage</a>
+        <button type="button" class="refresh-button" id="reload">Reload</button>
+      </header>
+      <section class="intro history-intro">
+        <p class="eyebrow">Local usage monitor</p>
+        <h1>Usage over time.</h1>
+        <p class="lede">Follow your quota usage and see where your current pace leads.</p>
+      </section>
+      <nav class="history-controls" id="ranges" aria-label="History range"></nav>
+      <nav class="history-controls" id="providers" aria-label="Provider filter"></nav>
+      <p class="history-status" id="history-status" role="status" aria-live="polite">Loading history…</p>
+      <div class="notice" id="history-error" role="alert"></div>
+      <div id="history-content"></div>
+      <footer>History reloads every 5 minutes.</footer>
+    </main>
+  </body>
+</html>
