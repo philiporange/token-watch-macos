@@ -52,11 +52,28 @@ struct DashboardView: View {
         .ignoresSafeArea(.container, edges: .bottom)
         .foregroundStyle(Palette.ink)
         .refreshable { await refreshAll() }
-        .sheet(isPresented: $notifications.openDetails) { ResetDetailsView(store: resets, notifications: notifications) }
-        .sheet(isPresented: $showsConnection) { ConnectionView(store: store) }
-        .sheet(item: $selectedProvider) { provider in
-            ProviderDetailView(provider: store.snapshot?.providers.first(where: { $0.id == provider.id }) ?? provider)
+        .sheet(isPresented: $notifications.openDetails, onDismiss: openBankedProvider) {
+            ResetDetailsView(store: resets, notifications: notifications)
         }
+        .sheet(isPresented: $showsConnection, onDismiss: openBankedProvider) { ConnectionView(store: store) }
+        .onChange(of: notifications.openBankedProvider) { _, _ in openBankedProvider() }
+        .onChange(of: store.snapshot) { _, _ in openBankedProvider() }
+        .onAppear { openBankedProvider() }
+        .sheet(item: $selectedProvider) { provider in
+            ProviderDetailView(initialProvider: provider, store: store, reminders: store.bankedReminders)
+        }
+    }
+
+    private func openBankedProvider() {
+        guard let route = notifications.openBankedProvider,
+              let provider = store.snapshot?.providers.first(where: { MacConnection.routeKey(for: $0.provider) == route }) else { return }
+        if notifications.openDetails || showsConnection {
+            notifications.openDetails = false
+            showsConnection = false
+            return
+        }
+        selectedProvider = provider
+        notifications.openBankedProvider = nil
     }
 
     private var masthead: some View {
@@ -253,11 +270,28 @@ private struct ProviderRow: View {
             }
             .foregroundStyle(.white)
             UsageTrack(fraction: window.fraction, color: .white)
-            HStack {
-                Text(window.title.uppercased()).tracking(0.7)
-                Spacer()
-                TimelineView(.periodic(from: .now, by: 60)) { timeline in
-                    Text(window.usedPercentage == nil ? "Unavailable" : UsageText.reset(window.resetsAt, now: timeline.date))
+            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                let usable = provider.bankedResets.filter { $0.usable && ($0.expiresAt.map { $0 > timeline.date } ?? true) }
+                let resetText = window.usedPercentage == nil ? "Unavailable" : UsageText.reset(window.resetsAt, now: timeline.date)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        Text(window.title.uppercased()).tracking(0.7)
+                        Spacer(minLength: 0)
+                        Text(resetText)
+                        if !usable.isEmpty { Text(resetSummary(usable, now: timeline.date)) }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(window.title.uppercased()).tracking(0.7)
+                            Spacer()
+                            Text(resetText)
+                        }
+                        if !usable.isEmpty {
+                            Text(resetSummary(usable, now: timeline.date))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
             }
             .font(.system(size: 10, design: .monospaced))
@@ -267,5 +301,12 @@ private struct ProviderRow: View {
         .padding(.vertical, 24)
         .background(Palette.provider(provider.provider))
         .accessibilityElement(children: .combine)
+    }
+
+    private func resetSummary(_ resets: [BankedReset], now: Date) -> String {
+        let count = "\(resets.count) " + (resets.count == 1 ? "RESET" : "RESETS")
+        guard let expiry = resets.compactMap(\.expiresAt).min() else { return count }
+        let hours = max(1, Int(ceil(expiry.timeIntervalSince(now) / 3600)))
+        return count + " · NEXT EXPIRES IN \(hours)H"
     }
 }

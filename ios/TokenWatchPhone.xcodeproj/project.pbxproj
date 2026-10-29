@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1F338F6914022A0EDD4E2404 /* ResetDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C00843FF942F02DDC6C06B8 /* ResetDetailsView.swift */; };
+		26E86C59467E5A79E420DC5B /* BankedResetReminders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1338E09FD7E4C345ABF67F4B /* BankedResetReminders.swift */; };
 		2A8FDA1813626F6B9BED78FF /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F603DC93FC20DE0E4E8CA87 /* DashboardView.swift */; };
 		5455E0B8506C9324F4532B0B /* ResetNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41BCD78729075E6AFCB1F264 /* ResetNotifications.swift */; };
 		66F784679E383BEE083431AB /* ProviderDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7DCBD75B6C6059753DCC831 /* ProviderDetailView.swift */; };
@@ -33,6 +34,7 @@
 
 /* Begin PBXFileReference section */
 		0F603DC93FC20DE0E4E8CA87 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		1338E09FD7E4C345ABF67F4B /* BankedResetReminders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BankedResetReminders.swift; sourceTree = "<group>"; };
 		1CA568971447135EE36002E7 /* TokenWatchPhone.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TokenWatchPhone.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		41BCD78729075E6AFCB1F264 /* ResetNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResetNotifications.swift; sourceTree = "<group>"; };
 		4AA28D77A8F0A9C05ED2873C /* CodexResetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResetStore.swift; sourceTree = "<group>"; };
@@ -88,6 +90,7 @@
 		9CD766531EDBA3AC39857EF8 /* TokenWatchPhone */ = {
 			isa = PBXGroup;
 			children = (
+				1338E09FD7E4C345ABF67F4B /* BankedResetReminders.swift */,
 				4AA28D77A8F0A9C05ED2873C /* CodexResetStore.swift */,
 				9978315D20996562DA448649 /* ConnectionView.swift */,
 				0F603DC93FC20DE0E4E8CA87 /* DashboardView.swift */,
@@ -244,6 +247,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				26E86C59467E5A79E420DC5B /* BankedResetReminders.swift in Sources */,
 				C204C24A11FBD5C627B5085E /* CodexResetStore.swift in Sources */,
 				6D99408850E22EDC555FF276 /* ConnectionView.swift in Sources */,
 				2A8FDA1813626F6B9BED78FF /* DashboardView.swift in Sources */,

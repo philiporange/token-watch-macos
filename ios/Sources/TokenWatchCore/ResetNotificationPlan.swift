@@ -5,6 +5,13 @@ public struct ResetNotice: Equatable, Sendable {
     public let title: String
     public let body: String
     public let fireAt: Date
+
+    public init(id: String, title: String, body: String, fireAt: Date) {
+        self.id = id
+        self.title = title
+        self.body = body
+        self.fireAt = fireAt
+    }
 }
 
 public struct ResetNotificationLedger: Codable, Equatable, Sendable {

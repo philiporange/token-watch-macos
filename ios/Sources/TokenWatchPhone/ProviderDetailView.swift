@@ -2,7 +2,15 @@ import SwiftUI
 import TokenWatchCore
 
 struct ProviderDetailView: View {
-    let provider: ProviderUsage
+    let initialProvider: ProviderUsage
+    @ObservedObject var store: UsageStore
+    @ObservedObject var reminders: BankedResetReminders
+    @State private var pendingReset: BankedReset?
+    @State private var resultMessages: [String: String] = [:]
+
+    private var provider: ProviderUsage {
+        store.snapshot?.providers.first(where: { $0.id == initialProvider.id }) ?? initialProvider
+    }
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -48,6 +56,9 @@ struct ProviderDetailView: View {
                         }
                         .padding(.vertical, 8)
                     }
+                    if !provider.bankedResets.isEmpty || !resultMessages.isEmpty {
+                        bankedResets
+                    }
                     if let updated = provider.updatedAt {
                         VStack(alignment: .leading, spacing: 7) {
                             Eyebrow(text: "Last read on your Mac", color: .white)
@@ -72,8 +83,88 @@ struct ProviderDetailView: View {
             .tint(.white)
             .toolbarBackground(.visible, for: .navigationBar)
         }
+        .task { await reminders.refreshAuthorization() }
+        .confirmationDialog("Apply \(provider.provider) reset?", isPresented: Binding(
+            get: { pendingReset != nil }, set: { if !$0 { pendingReset = nil } }
+        ), titleVisibility: .visible, presenting: pendingReset) { reset in
+            Button("Apply Reset", role: .destructive) {
+                Task {
+                    let result = await store.applyReset(provider: provider, reset: reset)
+                    resultMessages[reset.id] = result?.message ?? store.errorMessage ?? "Could not apply this reset."
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingReset = nil }
+        } message: { reset in
+            Text("\(reset.title) · \(expiryText(reset, now: .now)). This resets current usage windows now and can’t be undone.")
+        }
         .presentationDragIndicator(.visible)
         .presentationBackground(Palette.provider(provider.provider))
+    }
+
+    private var bankedResets: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Eyebrow(text: "Banked resets", color: .white)
+            ForEach(provider.bankedResets) { reset in
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack {
+                        Text(reset.title).font(.system(size: 16, weight: .semibold))
+                        Spacer()
+                        if store.isApplying(reset, provider: provider) {
+                            ProgressView().tint(.white)
+                        } else if reset.usable {
+                            Button("Apply") { pendingReset = reset }
+                                .font(.system(size: 13, weight: .semibold))
+                                .buttonStyle(.bordered)
+                                .accessibilityIdentifier("apply-reset-" + reset.id)
+                        }
+                    }
+                    if let description = reset.description {
+                        Text(description).font(.system(size: 12)).lineSpacing(3)
+                    }
+                    TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                        Text(expiryText(reset, now: timeline.date))
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                    if !reset.usable {
+                        Text(reset.status.capitalized).font(.system(size: 12, weight: .medium))
+                        if let note = reset.note { Text(note).font(.system(size: 12)).lineSpacing(3) }
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("banked-reset-" + reset.id)
+                Rectangle().fill(.white.opacity(0.25)).frame(height: 1)
+            }
+            ForEach(resultMessages.keys.sorted(), id: \.self) { id in
+                Text(resultMessages[id] ?? "").font(.system(size: 12)).lineSpacing(3)
+                    .accessibilityLabel(resultMessages[id] ?? "")
+            }
+            Text(store.snapshot?.autoApply?.enabled == true
+                 ? "Applied automatically \(store.snapshot?.autoApply?.leadMinutes ?? 5) min before expiry by your Mac"
+                 : "Automatic apply is off on your Mac")
+                .font(.system(size: 12)).lineSpacing(3)
+            Toggle("Remind me before resets expire", isOn: Binding(
+                get: { reminders.enabled },
+                set: { value in Task { await reminders.setEnabled(value, snapshot: store.snapshot) } }
+            ))
+            .font(.system(size: 13))
+            .tint(.black.opacity(0.4))
+            Text("24 h, 12 h, 4 h, 1 h and 15 min before expiry")
+                .font(.system(size: 11))
+            if reminders.authorization == .denied {
+                Text("Notifications are off for Token Watch in Settings.").font(.system(size: 12))
+            }
+            if let message = reminders.errorMessage { Text(message).font(.system(size: 12)) }
+        }
+        .foregroundStyle(.white)
+    }
+
+    private func expiryText(_ reset: BankedReset, now: Date) -> String {
+        guard let expiry = reset.expiresAt else { return "No expiry" }
+        let seconds = expiry.timeIntervalSince(now)
+        guard seconds > 0 else { return "Expired" }
+        if seconds > 86400 { return "Expires " + expiry.formatted(date: .abbreviated, time: .shortened) }
+        let minutes = Int(ceil(seconds / 60))
+        return "Expires in \(minutes / 60)h \(minutes % 60)m"
     }
 
     private func limit(_ window: UsageWindow, title: String) -> some View {

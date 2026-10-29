@@ -14,6 +14,8 @@ final class UsageStore: ObservableObject {
     @Published private(set) var fetchedAt: Date?
     @Published private(set) var isRequestingFreshReadings = false
     @Published private(set) var lastRemoteRefresh: Date?
+    @Published private(set) var applyingResetIDs: Set<String> = []
+    let bankedReminders: BankedResetReminders
 
     private struct CachedReading: Codable {
         let address: String
@@ -33,7 +35,8 @@ final class UsageStore: ObservableObject {
 
     var automaticRefreshDelay: TimeInterval { connection == nil ? 60 : retrySchedule.nextDelay }
 
-    init() {
+    init(bankedReminders: BankedResetReminders) {
+        self.bankedReminders = bankedReminders
         do {
             connection = try ConnectionKeychain.load()
             if connection == nil,
@@ -80,7 +83,7 @@ final class UsageStore: ObservableObject {
             do {
                 let (reading, data) = try await UsageClient.fetch(requestedConnection, refresh: force)
                 guard connection == requestedConnection else { return }
-                accept(reading, data: data, for: requestedConnection)
+                await accept(reading, data: data, for: requestedConnection)
                 retrySchedule.recordSuccess()
                 if force { lastRemoteRefresh = .now }
             } catch {
@@ -102,6 +105,40 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    func applyReset(provider: ProviderUsage, reset: BankedReset) async -> BankedResetApplyResult? {
+        let key = MacConnection.routeKey(for: provider.provider) + "." + reset.id
+        guard let requestedConnection = connection, !applyingResetIDs.contains(key) else { return nil }
+        applyingResetIDs.insert(key)
+        defer { applyingResetIDs.remove(key) }
+        do {
+            let result = try await UsageClient.applyReset(requestedConnection,
+                providerRouteKey: MacConnection.routeKey(for: provider.provider), resetID: reset.id)
+            if let running = requestTask { await running.value }
+            guard connection == requestedConnection else { return nil }
+            if let updated = snapshot?.replacingProvider(result.usage) {
+                let encoder = JSONEncoder()
+                encoder.dateEncodingStrategy = .custom { date, encoder in
+                    var container = encoder.singleValueContainer()
+                    let formatter = ISO8601DateFormatter()
+                    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                    try container.encode(formatter.string(from: date))
+                }
+                if let data = try? encoder.encode(updated) {
+                    await accept(updated, data: data, for: requestedConnection)
+                }
+            }
+            await refresh(force: false)
+            return result
+        } catch {
+            errorMessage = friendlyError(error)
+            return nil
+        }
+    }
+
+    func isApplying(_ reset: BankedReset, provider: ProviderUsage) -> Bool {
+        applyingResetIDs.contains(MacConnection.routeKey(for: provider.provider) + "." + reset.id)
+    }
+
     func connect(address: String, token: String) async throws {
         let candidate = try MacConnection(address: address, token: token)
         let (reading, data) = try await UsageClient.fetch(candidate)
@@ -109,7 +146,7 @@ final class UsageStore: ObservableObject {
         try ConnectionKeychain.save(candidate)
         connection = candidate
         retrySchedule.recordSuccess()
-        accept(reading, data: data, for: candidate)
+        await accept(reading, data: data, for: candidate)
     }
 
     func startMonitoring() {
@@ -135,7 +172,7 @@ final class UsageStore: ObservableObject {
         pathMonitor = nil
     }
 
-    private func accept(_ reading: UsageSnapshot, data: Data, for connection: MacConnection) {
+    private func accept(_ reading: UsageSnapshot, data: Data, for connection: MacConnection) async {
         snapshot = reading
         fetchedAt = .now
         isReachable = true
@@ -147,6 +184,7 @@ final class UsageStore: ObservableObject {
         } catch {
             errorMessage = "Connected, but this reading could not be saved for offline use."
         }
+        await bankedReminders.synchronize(reading)
     }
 
     func friendlyError(_ error: Error) -> String {

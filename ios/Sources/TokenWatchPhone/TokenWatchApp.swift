@@ -2,12 +2,16 @@ import SwiftUI
 
 @main
 struct TokenWatchPhoneApp: App {
-    @StateObject private var store = UsageStore()
+    @StateObject private var store: UsageStore
+    @StateObject private var bankedReminders: BankedResetReminders
     @StateObject private var resets: CodexResetStore
     @StateObject private var notifications: ResetNotifications
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
+        let reminders = BankedResetReminders()
+        _bankedReminders = StateObject(wrappedValue: reminders)
+        _store = StateObject(wrappedValue: UsageStore(bankedReminders: reminders))
         let alerts = ResetNotifications()
         _notifications = StateObject(wrappedValue: alerts)
         _resets = StateObject(wrappedValue: CodexResetStore(notifications: alerts))
@@ -22,6 +26,7 @@ struct TokenWatchPhoneApp: App {
                     guard scenePhase == .active else { return }
                     store.startMonitoring()
                     await notifications.refreshAuthorization()
+                    await bankedReminders.synchronize(store.snapshot)
                     while !Task.isCancelled {
                         async let usage: Void = store.refresh()
                         async let reset: Void = resets.refresh()

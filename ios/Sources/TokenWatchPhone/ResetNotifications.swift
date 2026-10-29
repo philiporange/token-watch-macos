@@ -10,6 +10,7 @@ final class ResetNotifications: NSObject, ObservableObject, UNUserNotificationCe
     @Published private(set) var errorMessage: String?
     @Published private(set) var testSent = false
     @Published var openDetails = false
+    @Published var openBankedProvider: String?
 
     private let center = UNUserNotificationCenter.current()
     private let ledgerKey = "resetNotificationLedger"
@@ -117,7 +118,15 @@ final class ResetNotifications: NSObject, ObservableObject, UNUserNotificationCe
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                            withCompletionHandler completionHandler: @escaping () -> Void) {
-        Task { @MainActor in self.openDetails = true }
+        let identifier = response.notification.request.identifier
+        Task { @MainActor in
+            if identifier.hasPrefix(BankedResetReminderPlan.prefix) {
+                self.openBankedProvider = identifier.dropFirst(BankedResetReminderPlan.prefix.count)
+                    .split(separator: ".").first.map(String.init)
+            } else {
+                self.openDetails = true
+            }
+        }
         completionHandler()
     }
 }
