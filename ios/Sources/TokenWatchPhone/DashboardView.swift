@@ -74,7 +74,7 @@ struct DashboardView: View {
             .accessibilityLabel("Reset alerts")
             .accessibilityIdentifier("reset-alerts")
             Button { showsConnection = true } label: {
-                Image(systemName: "slider.horizontal.3")
+                Image(systemName: "gearshape")
                     .font(.system(size: 19, weight: .medium))
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
