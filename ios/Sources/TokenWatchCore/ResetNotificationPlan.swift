@@ -5,12 +5,14 @@ public struct ResetNotice: Equatable, Sendable {
     public let title: String
     public let body: String
     public let fireAt: Date
+    public let thread: String
 
-    public init(id: String, title: String, body: String, fireAt: Date) {
+    public init(id: String, title: String, body: String, fireAt: Date, thread: String = "codex-resets") {
         self.id = id
         self.title = title
         self.body = body
         self.fireAt = fireAt
+        self.thread = thread
     }
 }
 
@@ -35,13 +37,14 @@ public struct ResetNotificationPlan: Sendable {
     public let notices: [ResetNotice]
     public let activeIDs: Set<String>
 
-    public static func make(tracker: ResetTracker, ledger: ResetNotificationLedger, now: Date) -> Self {
+    public static func make(tracker: ResetTracker, claude: ClaudeResetFeed = ClaudeResetFeed(),
+                            ledger: ResetNotificationLedger, now: Date) -> Self {
         var notices: [ResetNotice] = []
         var activeIDs: Set<String> = []
-        func add(_ id: String, title: String, body: String, at: Date) {
+        func add(_ id: String, title: String, body: String, at: Date, thread: String = "codex-resets") {
             activeIDs.insert(id)
             if !ledger.issuedIDs.contains(id) {
-                notices.append(ResetNotice(id: id, title: title, body: body, fireAt: at))
+                notices.append(ResetNotice(id: id, title: title, body: body, fireAt: at, thread: thread))
             }
         }
         for event in tracker.pending.sorted(by: { ($0.announcedAt, $0.id) < ($1.announcedAt, $1.id) }).prefix(16) where event.kind == .regular {
@@ -67,6 +70,22 @@ public struct ResetNotificationPlan: Sendable {
            latest.announcedAt <= now, latest.announcedAt >= now.addingTimeInterval(-3600) {
             add(prefix + "confirmed." + latest.id, title: "Codex reset reported",
                 body: "Codex Resets reports a reset. Refresh your Mac’s readings to check your allowance.", at: now.addingTimeInterval(1))
+        }
+        for reset in claude.resets.filter({ $0.announcedAt <= now && $0.announcedAt >= now.addingTimeInterval(-86_400) }).prefix(8) {
+            let title: String
+            let body: String
+            if reset.kind == .banked {
+                title = "Claude banked reset announced"
+                body = (reset.usableUntil.map { "Apply by \($0.formatted(date: .abbreviated, time: .shortened)). " } ?? "") +
+                    "Check Token Watch for a reset on your account."
+            } else {
+                title = "Claude reset reported"
+                body = "Claude Resets reports a usage reset" +
+                    (reset.scope.map { " for \($0)" } ?? "") +
+                    ". Refresh your Mac’s readings to check your allowance."
+            }
+            add(prefix + "claude.reported." + reset.id, title: title, body: body,
+                at: now.addingTimeInterval(1), thread: "claude-resets")
         }
         return Self(notices: notices, activeIDs: activeIDs)
     }

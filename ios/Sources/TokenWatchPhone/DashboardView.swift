@@ -8,7 +8,7 @@ private enum UsagePeriod: String, CaseIterable, Identifiable {
 
 struct DashboardView: View {
     @ObservedObject var store: UsageStore
-    @ObservedObject var resets: CodexResetStore
+    @ObservedObject var resets: ResetStore
     @ObservedObject var notifications: ResetNotifications
     @State private var period = UsagePeriod.longRange
     @State private var showsConnection = false
@@ -22,6 +22,7 @@ struct DashboardView: View {
                 if let snapshot = store.snapshot {
                     sourceStatus(snapshot).padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 12)
                     resetBanner
+                    claudeBanner
                     periodPicker.padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 10)
                     if let message = store.errorMessage {
                         notice("\(message) Retrying automatically.").padding(.horizontal, 24).padding(.vertical, 16)
@@ -44,6 +45,7 @@ struct DashboardView: View {
                         .background(Palette.provider(snapshot.providers.last?.provider ?? ""))
                 } else {
                     resetBanner.padding(.top, 18)
+                    claudeBanner
                     welcome.padding(.horizontal, 24).padding(.top, 60).padding(.bottom, 44)
                 }
             }
@@ -218,6 +220,38 @@ struct DashboardView: View {
                 .font(.system(size: 9, design: .monospaced)).foregroundStyle(.black.opacity(0.65))
                 .padding(.trailing, 24).padding(.bottom, 6)
                 .accessibilityLabel("Data from Codex Resets")
+        }
+    }
+
+    private var claudeBanner: some View {
+        Button { notifications.openDetails = true } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("CLAUDE RESET").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(1)
+                    Spacer()
+                    Image(systemName: "arrow.up.right").font(.system(size: 13, weight: .semibold))
+                }
+                TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                    Text(ResetText.claudeHeadline(resets.claude, now: timeline.date,
+                                                  checked: resets.claudeChecked, error: resets.claudeErrorMessage))
+                        .font(.system(size: 20, weight: .semibold)).tracking(-0.5)
+                }
+                if let subline = ResetText.claudeSubline(resets.claude, stale: resets.claudeStale) {
+                    Text(subline).font(.system(size: 11))
+                }
+            }
+            .foregroundStyle(.black)
+            .padding(.horizontal, 24).padding(.top, 12).padding(.bottom, 27)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.reset)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("claude-reset-banner")
+        .overlay(alignment: .bottomTrailing) {
+            Link("claude-resets.com ↗", destination: URL(string: "https://claude-resets.com")!)
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.black.opacity(0.65))
+                .padding(.trailing, 24).padding(.bottom, 6)
+                .accessibilityLabel("Data from Claude Resets")
         }
     }
 

@@ -8,10 +8,10 @@ public enum ResetError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidResponse(let detail): "Codex reset data was invalid: \(detail)"
-        case .server(let code): "Codex reset service returned HTTP \(code)."
+        case .invalidResponse(let detail): "Reset data was invalid: \(detail)"
+        case .server(let code): "Reset service returned HTTP \(code)."
         case .rateLimited(let date), .retryLater(let date):
-            "Codex reset service asked us to retry after \(date.formatted())."
+            "Reset service asked us to retry after \(date.formatted())."
         }
     }
 }
@@ -99,49 +99,15 @@ public actor CodexResetClient {
     }
 
     private func send(_ request: URLRequest, now: Date) async throws -> (Data, HTTPURLResponse) {
-        let (bytes, rawResponse) = try await session.bytes(for: request)
-        guard let response = rawResponse as? HTTPURLResponse else {
-            throw ResetError.invalidResponse("Missing HTTP response.")
-        }
-        guard response.expectedContentLength <= 524_288 else {
-            throw ResetError.invalidResponse("Response exceeds 512 KiB.")
-        }
-        var data = Data()
-        for try await byte in bytes {
-            guard data.count < 524_288 else {
-                throw ResetError.invalidResponse("Response exceeds 512 KiB.")
-            }
-            data.append(byte)
-        }
+        let (data, response) = try await ResetHTTP.load(request, session: session)
         if response.statusCode == 429 {
-            let seconds = Self.retryDelay(response.value(forHTTPHeaderField: "Retry-After"), now: now)
+            let seconds = ResetHTTP.retryDelay(response.value(forHTTPHeaderField: "Retry-After"), now: now)
             let retry = now.addingTimeInterval(TimeInterval(seconds))
             nextAttempt = retry
             throw ResetError.rateLimited(retry)
         }
         nextAttempt = nil
         return (data, response)
-    }
-
-    private static func retryDelay(_ value: String?, now: Date) -> Int {
-        if let value, let seconds = Int(value) { return max(60, seconds) }
-        if let value, let date = HTTPDate.parse(value) {
-            return max(60, Int(date.timeIntervalSince(now)))
-        }
-        return 300
-    }
-}
-
-private enum HTTPDate {
-    static func parse(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        for format in ["EEE, dd MMM yyyy HH:mm:ss zzz", "EEEE, dd-MMM-yy HH:mm:ss zzz", "EEE MMM d HH:mm:ss yyyy"] {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: value) { return date }
-        }
-        return nil
     }
 }
 

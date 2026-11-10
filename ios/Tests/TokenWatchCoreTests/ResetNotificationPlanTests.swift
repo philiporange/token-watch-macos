@@ -66,4 +66,39 @@ final class ResetNotificationPlanTests: XCTestCase {
         for index in 0..<600 { ledger.record(String(index)) }
         XCTAssertEqual(ledger.issuedIDs.count, 512)
     }
+
+    func testRecentClaudeReportsAlertOnceInTheirOwnThread() {
+        let feed = ClaudeResetFeed(resets: [
+            ClaudeReset(id: "regular", announcedAt: now.addingTimeInterval(-60), scope: "Pro"),
+            ClaudeReset(id: "banked", kind: .banked, announcedAt: now.addingTimeInterval(-120),
+                        usableUntil: now.addingTimeInterval(3600))
+        ], detectorFresh: true)
+        var ledger = ResetNotificationLedger()
+        let plan = ResetNotificationPlan.make(tracker: ResetTracker(), claude: feed, ledger: ledger, now: now)
+        XCTAssertEqual(plan.notices.count, 2)
+        XCTAssertEqual(Set(plan.notices.map(\.thread)), ["claude-resets"])
+        XCTAssertTrue(plan.notices.allSatisfy { $0.fireAt == now.addingTimeInterval(1) })
+        XCTAssertTrue(plan.notices.contains { $0.title == "Claude reset reported" && $0.body.contains("for Pro") })
+        XCTAssertTrue(plan.notices.contains { $0.title == "Claude banked reset announced" && $0.body.contains("Apply by") })
+        for notice in plan.notices { ledger.record(notice.id) }
+        let again = ResetNotificationPlan.make(tracker: ResetTracker(), claude: feed, ledger: ledger, now: now)
+        XCTAssertTrue(again.notices.isEmpty)
+        XCTAssertEqual(again.activeIDs, plan.activeIDs)
+    }
+
+    func testOldAndFutureClaudeReportsDoNotAlertAndDefaultPreservesCodexPlan() {
+        let feed = ClaudeResetFeed(resets: [
+            ClaudeReset(id: "old", announcedAt: now.addingTimeInterval(-86_401)),
+            ClaudeReset(id: "future", announcedAt: now.addingTimeInterval(1))
+        ], detectorFresh: true)
+        XCTAssertTrue(ResetNotificationPlan.make(tracker: ResetTracker(), claude: feed,
+                                                  ledger: ResetNotificationLedger(), now: now).notices.isEmpty)
+        var tracker = ResetTracker()
+        tracker.apply(ResetStatus(generatedAt: now, scheduled: event(expected: now.addingTimeInterval(3600)), latest: nil), now: now)
+        let original = ResetNotificationPlan.make(tracker: tracker, ledger: ResetNotificationLedger(), now: now)
+        let explicitEmpty = ResetNotificationPlan.make(tracker: tracker, claude: ClaudeResetFeed(),
+                                                       ledger: ResetNotificationLedger(), now: now)
+        XCTAssertEqual(original.notices, explicitEmpty.notices)
+        XCTAssertEqual(original.activeIDs, explicitEmpty.activeIDs)
+    }
 }

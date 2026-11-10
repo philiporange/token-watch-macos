@@ -4,7 +4,7 @@ import SwiftUI
 struct TokenWatchPhoneApp: App {
     @StateObject private var store: UsageStore
     @StateObject private var bankedReminders: BankedResetReminders
-    @StateObject private var resets: CodexResetStore
+    @StateObject private var resets: ResetStore
     @StateObject private var notifications: ResetNotifications
     @Environment(\.scenePhase) private var scenePhase
 
@@ -14,7 +14,7 @@ struct TokenWatchPhoneApp: App {
         _store = StateObject(wrappedValue: UsageStore(bankedReminders: reminders))
         let alerts = ResetNotifications()
         _notifications = StateObject(wrappedValue: alerts)
-        _resets = StateObject(wrappedValue: CodexResetStore(notifications: alerts))
+        _resets = StateObject(wrappedValue: ResetStore(notifications: alerts))
     }
 
     var body: some Scene {
@@ -42,7 +42,7 @@ struct TokenWatchPhoneApp: App {
                     }
                 }
         }
-        .backgroundTask(.appRefresh(CodexResetStore.backgroundIdentifier)) {
+        .backgroundTask(.appRefresh(ResetStore.backgroundIdentifier)) {
             async let usage: Void = store.refresh()
             async let reset: Void = resets.refresh()
             _ = await (usage, reset)

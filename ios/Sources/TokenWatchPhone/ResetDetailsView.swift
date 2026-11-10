@@ -15,10 +15,29 @@ enum ResetText {
         if date <= .now { return "Expected time passed · still pending" }
         return "Expected by " + date.formatted(date: .omitted, time: .shortened)
     }
+
+    static func claudeHeadline(_ feed: ClaudeResetFeed, now: Date, checked: Date?, error: String?) -> String {
+        if let deadline = feed.openBanked(now: now).first?.usableUntil {
+            return "Banked reset · apply by " + deadline.formatted(date: .abbreviated, time: .omitted)
+        }
+        if let latest = feed.latest {
+            let hours = max(0, Int(now.timeIntervalSince(latest.announcedAt) / 3600))
+            if hours < 1 { return "Last reset just now" }
+            if hours < 24 { return "Last reset \(hours)h ago" }
+            return "Last reset \(hours / 24)d ago"
+        }
+        if error != nil { return "Updates unavailable" }
+        return checked == nil ? "Checking reports" : "No resets reported"
+    }
+
+    static func claudeSubline(_ feed: ClaudeResetFeed, stale: Bool) -> String? {
+        if let scope = feed.latest?.scope, !scope.isEmpty { return "For " + scope }
+        return stale ? "Saved report · check for updates" : nil
+    }
 }
 
 struct ResetDetailsView: View {
-    @ObservedObject var store: CodexResetStore
+    @ObservedObject var store: ResetStore
     @ObservedObject var notifications: ResetNotifications
     @Environment(\.dismiss) private var dismiss
 
@@ -32,6 +51,7 @@ struct ResetDetailsView: View {
                     if let message = store.errorMessage {
                         Text(message).font(.system(size: 12)).foregroundStyle(Palette.rust)
                     }
+                    claudeStatus
                     VStack(alignment: .leading, spacing: 14) {
                         Eyebrow(text: "Reset alerts")
                         if notifications.enabled && notifications.permitted {
@@ -74,7 +94,7 @@ struct ResetDetailsView: View {
                             }
                             .accessibilityIdentifier("enable-reset-notifications")
                         }
-                        Text("Get new reset announcements, a reminder 15 minutes before the expected time, and confirmation when a reset is reported.")
+                        Text("Get new Codex reset announcements, a reminder 15 minutes before the expected time, and an alert when a Codex or Claude reset is reported.")
                             .font(.system(size: 13)).foregroundStyle(Palette.muted).lineSpacing(4)
                         Text("Scheduled reminders work while the app is closed. New announcements are checked when you open the app and when iOS allows background refresh.")
                             .font(.system(size: 12)).foregroundStyle(Palette.muted).lineSpacing(4)
@@ -141,5 +161,51 @@ struct ResetDetailsView: View {
             }
         }
         .padding(.vertical, 20).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var claudeStatus: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Claude resets").font(.system(size: 26, weight: .bold))
+            TimelineView(.periodic(from: .now, by: 60)) { timeline in
+                Text(ResetText.claudeHeadline(store.claude, now: timeline.date,
+                                              checked: store.claudeChecked, error: store.claudeErrorMessage))
+                    .font(.system(size: 20, weight: .semibold))
+            }
+            if let latest = store.claude.latest {
+                if !latest.text.isEmpty {
+                    Text(latest.text).font(.system(size: 13)).foregroundStyle(Palette.muted)
+                }
+                Text("Reported " + latest.announcedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                if let source = latest.sourceURL {
+                    Link("View announcement ↗", destination: source).font(.system(size: 12, weight: .medium))
+                }
+                if latest.provisional {
+                    Text("Unconfirmed · detected automatically")
+                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                }
+            }
+            ForEach(store.claude.openBanked(now: .now)) { reset in
+                VStack(alignment: .leading, spacing: 3) {
+                    if let deadline = reset.usableUntil {
+                        Text("Banked reset · apply by " + deadline.formatted(date: .abbreviated, time: .shortened))
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    if let scope = reset.scope, !scope.isEmpty {
+                        Text("For " + scope).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    }
+                }
+            }
+            if let message = store.claudeErrorMessage {
+                Text(message).font(.system(size: 12)).foregroundStyle(Palette.rust)
+            }
+            if let checked = store.claudeChecked {
+                Text("Checked " + checked.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.muted)
+            }
+            Link("Data from claude-resets.com ↗", destination: URL(string: "https://claude-resets.com")!)
+                .font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.accent)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

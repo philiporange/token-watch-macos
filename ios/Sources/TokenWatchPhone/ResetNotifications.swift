@@ -54,13 +54,13 @@ final class ResetNotifications: NSObject, ObservableObject, UNUserNotificationCe
         reminderCount = 0
     }
 
-    func synchronize(_ tracker: ResetTracker, now: Date = .now) async {
+    func synchronize(_ tracker: ResetTracker, claude: ClaudeResetFeed, now: Date = .now) async {
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
         await refreshAuthorization()
         guard enabled, permitted else { return }
-        let plan = ResetNotificationPlan.make(tracker: tracker, ledger: ledger, now: now)
+        let plan = ResetNotificationPlan.make(tracker: tracker, claude: claude, ledger: ledger, now: now)
         let existing = await center.pendingNotificationRequests()
         let obsolete = existing.map(\.identifier).filter {
             $0.hasPrefix(ResetNotificationPlan.prefix) && $0 != ResetNotificationPlan.prefix + "test" && !plan.activeIDs.contains($0)
@@ -73,7 +73,7 @@ final class ResetNotifications: NSObject, ObservableObject, UNUserNotificationCe
             content.title = notice.title
             content.body = notice.body
             content.sound = .default
-            content.threadIdentifier = "codex-resets"
+            content.threadIdentifier = notice.thread
             let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, notice.fireAt.timeIntervalSinceNow), repeats: false)
             do {
                 try await center.add(UNNotificationRequest(identifier: notice.id, content: content, trigger: trigger))
