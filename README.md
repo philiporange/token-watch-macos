@@ -32,7 +32,7 @@ Each provider appears once its local credentials are found:
 |----------|-------------|
 | Claude | `claude` login: `~/.claude/.credentials.json`, Keychain, or `CLAUDE_CODE_OAUTH_TOKEN` |
 | Codex | `codex` login, via `codex app-server` |
-| Gemini | `agy` login: Keychain, or `~/.gemini/antigravity-cli/antigravity-oauth-token` |
+| Gemini | Sign in with `agy`. Version 1.1.11 or later provides grouped quotas through its built-in `/usage` command. Keychain and token-file credentials support direct polling. |
 | z.ai | `ZAI_API_KEY` in the environment or `~/.env` |
 | Muse | `muse login`: Keychain (`ai.meta.dev.credentials`), or `~/.config/muse/auth.json` |
 | AliCloud | Model Studio console login in Muon (`login_aliyunid_ticket` cookie), or `ALICLOUD_CONSOLE_TICKET` in the environment or `~/.env` |

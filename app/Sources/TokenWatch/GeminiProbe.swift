@@ -6,13 +6,14 @@ struct GeminiProbe: Sendable {
 
     init(
         credentialLoader: AgyCredentialLoader = AgyCredentialLoader(),
-        apiClient: AgyAPIClient = AgyAPIClient()
+        apiClient: AgyAPIClient = .live
     ) {
         self.credentialLoader = credentialLoader
         self.apiClient = apiClient
     }
 
     func fetch() async -> ProviderSnapshot {
+        let cliSummary = credentialLoader.hasTokenFileOverride ? nil : await apiClient.readCLIQuota()
         do {
             var credential = try credentialLoader.loadCredential()
             if credentialLoader.needsRefresh(credential) {
@@ -21,14 +22,17 @@ struct GeminiProbe: Sendable {
 
             let result: AgyQuotaFetchResult
             do {
-                result = try await apiClient.fetchQuota(credential.accessToken)
+                result = try await apiClient.fetchQuota(credential.accessToken, cliSummary)
             } catch AgyError.authenticationFailed {
                 credential.accessToken = try await refreshedAccessToken(for: credential)
-                result = try await apiClient.fetchQuota(credential.accessToken)
+                result = try await apiClient.fetchQuota(credential.accessToken, cliSummary)
             }
 
-            return snapshot(from: result)
+            return snapshot(from: result.summary, tier: result.tier)
         } catch {
+            if let cliSummary {
+                return snapshot(from: cliSummary, tier: nil)
+            }
             return failureSnapshot(error.localizedDescription)
         }
     }
@@ -40,16 +44,26 @@ struct GeminiProbe: Sendable {
         return try await apiClient.refreshAccessToken(refreshToken)
     }
 
-    private func snapshot(from result: AgyQuotaFetchResult) -> ProviderSnapshot {
-        let groups = result.summary.groups
-        guard let primary = groups.first else {
+    private func snapshot(from summary: AgyQuotaSummary, tier: String?) -> ProviderSnapshot {
+        let groups = summary.groups
+        guard !groups.isEmpty else {
             return failureSnapshot("Gemini quota response returned no model groups.")
         }
 
-        let fiveHourBucket = primary.buckets.first { $0.kind == .fiveHour }
-        let weeklyBucket = primary.buckets.first { $0.kind == .weekly }
-        let additionalWindows = groups.dropFirst().flatMap { group in
-            group.buckets.compactMap { bucket -> ModelUsageWindow? in
+        let primaryIndex = groups.firstIndex { group in
+            group.buckets.contains { bucket in
+                let id = bucket.bucketId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return id == "gemini-weekly" || id == "gemini-5h"
+            }
+        } ?? groups.firstIndex {
+            ["gemini", "gemini models"].contains($0.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        }
+        let primary = primaryIndex.map { groups[$0] }
+        let fiveHourBucket = primary?.buckets.first { $0.kind == .fiveHour }
+        let weeklyBucket = primary?.buckets.first { $0.kind == .weekly }
+        let additionalWindows = groups.indices.filter { $0 != primaryIndex }.flatMap { index in
+            let group = groups[index]
+            return group.buckets.compactMap { bucket -> ModelUsageWindow? in
                 guard let kind = bucket.kind else { return nil }
                 return ModelUsageWindow(
                     modelName: "\(group.displayName) · \(bucket.displayName)",
@@ -59,7 +73,7 @@ struct GeminiProbe: Sendable {
             }
         }
 
-        let detail = [primary.displayName, result.tier]
+        let detail = [primary?.displayName, tier]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " · ")
@@ -76,14 +90,17 @@ struct GeminiProbe: Sendable {
     }
 
     private func usageWindow(from bucket: AgyQuotaBucket, kind: UsageWindowKind) -> UsageWindow {
+        if bucket.disabled == true {
+            return UsageWindow(kind: kind, usedPercentage: nil, resetsAt: parseISODate(bucket.resetTime), message: "Quota disabled.")
+        }
         let usedPercentage = bucket.remainingFraction.map {
             (1 - min(max($0, 0), 1)) * 100
         }
         return UsageWindow(
             kind: kind,
-            usedPercentage: bucket.disabled == true ? nil : usedPercentage,
+            usedPercentage: usedPercentage,
             resetsAt: parseISODate(bucket.resetTime),
-            message: bucket.disabled == true ? "Quota disabled." : nil
+            message: usedPercentage == nil ? "Quota unavailable." : nil
         )
     }
 
@@ -147,7 +164,7 @@ struct GeminiProbe: Sendable {
         }
     }
 
-    static func liveFetchQuota(with accessToken: String) async throws -> AgyQuotaFetchResult {
+    static func liveFetchQuota(with accessToken: String, cliSummary: AgyQuotaSummary?) async throws -> AgyQuotaFetchResult {
         var lastError: Error = AgyError.invalidResponse("No Gemini quota host responded.")
         for host in ["daily-cloudcode-pa.googleapis.com", "cloudcode-pa.googleapis.com"] {
             do {
@@ -157,6 +174,9 @@ struct GeminiProbe: Sendable {
                     accessToken: accessToken,
                     body: ["metadata": ["ideType": "ANTIGRAVITY"]]
                 )
+                if let cliSummary {
+                    return AgyQuotaFetchResult(summary: cliSummary, tier: load.tierName, host: host)
+                }
                 guard let project = trimmed(load.cloudaicompanionProject) else {
                     throw AgyError.invalidResponse("Gemini loadCodeAssist returned no project.")
                 }
@@ -247,6 +267,8 @@ struct AgyCredentialLoader: Sendable {
     private let homeDirectory: URL
     private let environment: [String: String]
     private let keychainLoadOverride: Result<String?, AgyError>?
+
+    var hasTokenFileOverride: Bool { Self.trimmed(environment["AGY_OAUTH_TOKEN_FILE"]) != nil }
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -369,15 +391,46 @@ struct AgyCredentialLoader: Sendable {
 }
 
 struct AgyAPIClient: Sendable {
-    let fetchQuota: @Sendable (String) async throws -> AgyQuotaFetchResult
-    let refreshAccessToken: @Sendable (String) async throws -> String
+    static let live = AgyAPIClient(
+        readCLIQuota: { await AgyCLIUsage.read() },
+        fetchQuota: GeminiProbe.liveFetchQuota(with:cliSummary:),
+        refreshAccessToken: GeminiProbe.liveRefreshAccessToken
+    )
 
-    init(
-        fetchQuota: @escaping @Sendable (String) async throws -> AgyQuotaFetchResult = GeminiProbe.liveFetchQuota(with:),
-        refreshAccessToken: @escaping @Sendable (String) async throws -> String = GeminiProbe.liveRefreshAccessToken(_:)
-    ) {
-        self.fetchQuota = fetchQuota
-        self.refreshAccessToken = refreshAccessToken
+    var readCLIQuota: @Sendable () async -> AgyQuotaSummary? = { nil }
+    let fetchQuota: @Sendable (String, AgyQuotaSummary?) async throws -> AgyQuotaFetchResult
+    let refreshAccessToken: @Sendable (String) async throws -> String
+}
+
+struct AgyCLIUsage: Decodable {
+    let status: String
+    let command: Command
+
+    struct Command: Decodable {
+        let name: String
+        let data: AgyQuotaSummary
+    }
+
+    static func read(executable: String? = nil) async -> AgyQuotaSummary? {
+        await Task.detached(priority: .utility) {
+            guard let path = executable ?? ProcessRunner.which("agy") else { return nil }
+            func run(_ arguments: [String]) throws -> String {
+                try ProcessRunner.runSync(
+                    executable: path, arguments: arguments, input: nil, timeout: 20,
+                    currentDirectory: FileManager.default.temporaryDirectory
+                )
+            }
+            // Print mode gained a built-in, quota-free /usage command in agy 1.1.11.
+            guard let version = try? run(["--version"]).trimmingCharacters(in: .whitespacesAndNewlines),
+                  version.wholeMatch(of: /[0-9]+\.[0-9]+\.[0-9]+/) != nil,
+                  version.compare("1.1.11", options: .numeric) != .orderedAscending,
+                  let output = try? run(["--output-format", "json", "-p", "/usage"]) else { return nil }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            guard let usage = try? decoder.decode(Self.self, from: Data(output.utf8)),
+                  usage.status == "SUCCESS", usage.command.name == "usage" else { return nil }
+            return usage.command.data
+        }.value
     }
 }
 
@@ -469,7 +522,7 @@ struct AgyQuotaSummary: Decodable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        groups = (try? container.decodeIfPresent([AgyQuotaGroup].self, forKey: .groups)) ?? []
+        groups = try container.decode([AgyQuotaGroup].self, forKey: .groups)
         description = try container.decodeIfPresent(String.self, forKey: .description)
     }
 }
@@ -487,13 +540,15 @@ struct AgyQuotaGroup: Decodable, Sendable {
 
     enum CodingKeys: CodingKey {
         case displayName
+        case name
         case description
         case buckets
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        displayName = (try? container.decodeIfPresent(String.self, forKey: .displayName)) ?? "Gemini Models"
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+            ?? container.decodeIfPresent(String.self, forKey: .name) ?? "Model group"
         description = try container.decodeIfPresent(String.self, forKey: .description)
         buckets = (try? container.decodeIfPresent([AgyQuotaBucket].self, forKey: .buckets)) ?? []
     }
@@ -525,7 +580,9 @@ struct AgyQuotaBucket: Decodable, Sendable {
 
     enum CodingKeys: CodingKey {
         case bucketId
+        case id
         case displayName
+        case name
         case window
         case remainingFraction
         case resetTime
@@ -535,14 +592,16 @@ struct AgyQuotaBucket: Decodable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         bucketId = try container.decodeIfPresent(String.self, forKey: .bucketId)
+            ?? container.decodeIfPresent(String.self, forKey: .id)
         displayName = (try? container.decodeIfPresent(String.self, forKey: .displayName))
+            ?? (try? container.decodeIfPresent(String.self, forKey: .name))
             ?? (try? container.decodeIfPresent(String.self, forKey: .window))
             ?? "Quota"
         window = try container.decodeIfPresent(String.self, forKey: .window)
         if let value = try? container.decodeIfPresent(Double.self, forKey: .remainingFraction) {
             remainingFraction = value
         } else if let value = try? container.decodeIfPresent(String.self, forKey: .remainingFraction) {
-            remainingFraction = Double(value)
+            remainingFraction = Double(value).flatMap { $0.isFinite ? $0 : nil }
         } else {
             remainingFraction = nil
         }

@@ -77,7 +77,7 @@ struct GeminiProbeTests {
 
         let summary = try JSONDecoder().decode(AgyQuotaSummary.self, from: data)
 
-        #expect(summary.groups[0].displayName == "Gemini Models")
+        #expect(summary.groups[0].displayName == "Model group")
         #expect(summary.groups[0].buckets[0].displayName == "weekly")
         #expect(summary.groups[0].buckets[0].remainingFraction == 0.75)
         #expect(summary.groups[0].buckets[0].kind == .weekly)
@@ -125,7 +125,7 @@ struct GeminiProbeTests {
                 keychainLoadOverride: .success(rawCredential)
             ),
             apiClient: AgyAPIClient(
-                fetchQuota: { token in
+                fetchQuota: { token, _ in
                     #expect(token == "fresh-token")
                     return result
                 },
@@ -170,7 +170,7 @@ struct GeminiProbeTests {
         let probe = GeminiProbe(
             credentialLoader: AgyCredentialLoader(environment: [:], keychainLoadOverride: .success(rawCredential)),
             apiClient: AgyAPIClient(
-                fetchQuota: { token in
+                fetchQuota: { token, _ in
                     if await attempts.next() == 1 {
                         #expect(token == "stale")
                         throw AgyError.authenticationFailed
@@ -202,12 +202,114 @@ struct GeminiProbeTests {
         )
         let probe = GeminiProbe(
             credentialLoader: AgyCredentialLoader(environment: [:], keychainLoadOverride: .success(rawCredential)),
-            apiClient: AgyAPIClient(fetchQuota: { _ in result }, refreshAccessToken: { _ in "unused" })
+            apiClient: AgyAPIClient(fetchQuota: { _, _ in result }, refreshAccessToken: { _ in "unused" })
         )
 
         let snapshot = await probe.fetch()
 
         #expect(snapshot.fiveHour.usedPercentage == nil)
         #expect(snapshot.fiveHour.message == "Quota disabled.")
+    }
+
+    @Test
+    func readsBuiltinQuotaAndKeepsModelGroupsSeparate() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let agy = directory.appendingPathComponent("agy")
+        let script = """
+        #!/bin/sh
+        case "$*" in
+          "--version") echo 1.5.13 ;;
+          "--output-format json -p /usage") cat <<'JSON'
+        {"status":"SUCCESS","usage":{"total_tokens":0},"command":{"name":"usage","data":{"groups":[
+          {"name":"Claude and GPT models","buckets":[{"id":"3p-weekly","window":"weekly","remaining_fraction":1}]},
+          {"name":"Gemini 4 Argon","buckets":[{"id":"gemini-argon-wtu-weekly","name":"Argon Weekly Limit","window":"weekly","remaining_fraction":0}]},
+          {"name":"Gemini Models","buckets":[
+            {"id":"gemini-weekly","window":"weekly","remaining_fraction":0.9675,"reset_time":"2030-01-02T03:04:05Z"},
+            {"id":"gemini-5h","window":"5h","remaining_fraction":1}
+          ]}
+        ]}}}
+        JSON
+          ;;
+          *) exit 2 ;;
+        esac
+        """
+        try script.write(to: agy, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: agy.path)
+        let raw = #"{"access_token":"token"}"#
+        let client = AgyAPIClient(
+            readCLIQuota: { await AgyCLIUsage.read(executable: agy.path) },
+            fetchQuota: { _, cliSummary in
+                AgyQuotaFetchResult(summary: try #require(cliSummary), tier: "Google AI Pro", host: "test")
+            },
+            refreshAccessToken: { _ in "unused" }
+        )
+        let probe = GeminiProbe(
+            credentialLoader: AgyCredentialLoader(environment: [:], keychainLoadOverride: .success(raw)),
+            apiClient: client
+        )
+        let snapshot = await probe.fetch()
+        #expect(abs(try #require(snapshot.weekly.usedPercentage) - 3.25) < 0.0001)
+        #expect(snapshot.weekly.resetsAt == ISO8601DateFormatter().date(from: "2030-01-02T03:04:05Z"))
+        #expect(snapshot.fiveHour.usedPercentage == 0)
+        #expect(snapshot.detail == "Gemini Models · Google AI Pro")
+        #expect(snapshot.modelWindows.map(\.modelName) == ["Claude and GPT models · weekly", "Gemini 4 Argon · Argon Weekly Limit"])
+        #expect(snapshot.modelWindows.map(\.window.usedPercentage) == [0, 100])
+
+        let noCredential = GeminiProbe(
+            credentialLoader: AgyCredentialLoader(homeDirectory: directory, environment: [:], keychainLoadOverride: .success(nil)),
+            apiClient: client
+        )
+        let cliOnly = await noCredential.fetch()
+        #expect(cliOnly.weekly.usedPercentage == snapshot.weekly.usedPercentage)
+        #expect(cliOnly.detail == "Gemini Models")
+    }
+
+    @Test
+    func unsupportedCLIIsNeverSentAPrompt() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let agy = directory.appendingPathComponent("agy")
+        try """
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then echo 1.1.10; else touch "$0.invoked"; fi
+        """.write(to: agy, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: agy.path)
+
+        #expect(await AgyCLIUsage.read(executable: agy.path) == nil)
+        #expect(!FileManager.default.fileExists(atPath: agy.path + ".invoked"))
+    }
+
+    @Test
+    func tokenFileOverrideKeepsThirdPartyQuotaOutOfGeminiWindows() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let tokenFile = directory.appendingPathComponent("credential")
+        try #"{"access_token":"custom"}"#.write(to: tokenFile, atomically: true, encoding: .utf8)
+        let result = AgyQuotaFetchResult(
+            summary: AgyQuotaSummary(groups: [
+                AgyQuotaGroup(displayName: "Claude and GPT models", buckets: [
+                    AgyQuotaBucket(bucketId: "3p-weekly", displayName: "Weekly Limit", remainingFraction: 1)
+                ])
+            ]),
+            tier: nil, host: "test"
+        )
+        let probe = GeminiProbe(
+            credentialLoader: AgyCredentialLoader(environment: ["AGY_OAUTH_TOKEN_FILE": tokenFile.path], keychainLoadOverride: .success(nil)),
+            apiClient: AgyAPIClient(
+                readCLIQuota: { Issue.record("Invoked agy for a custom credential"); return nil },
+                fetchQuota: { token, cliSummary in
+                    #expect(token == "custom")
+                    #expect(cliSummary == nil)
+                    return result
+                },
+                refreshAccessToken: { _ in "unused" }
+            )
+        )
+
+        let snapshot = await probe.fetch()
+        #expect(snapshot.weekly.usedPercentage == nil)
+        #expect(snapshot.weekly.message == "No Gemini weekly limit returned.")
+        #expect(snapshot.modelWindows.first?.window.usedPercentage == 0)
     }
 }

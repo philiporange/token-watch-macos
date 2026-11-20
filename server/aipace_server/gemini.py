@@ -1,18 +1,22 @@
-"""Collect Gemini quota usage from Antigravity CLI (``agy``) credentials."""
+"""Read Gemini quotas from agy's JSON usage command or its credential-backed API."""
 
+import asyncio
 import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
+import math
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 from typing import Any, Mapping
 
 import httpx
 
 from aipace_server.models import ModelUsageWindow, ProviderSnapshot, UsageWindow
+from aipace_server.processes import find_executable
 
 
 HOSTS = (
@@ -27,6 +31,8 @@ OAUTH_CLIENT_ID = (
 )
 OAUTH_CLIENT_SECRET = "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"
 KEYRING_PREFIX = "go-keyring-base64:"
+JSON_USAGE_MIN_VERSION = (1, 1, 11)
+GEMINI_BUCKET_IDS = {"gemini-5h", "gemini-weekly"}
 
 
 class AgyError(RuntimeError):
@@ -88,10 +94,10 @@ def decode_agy_secret(raw: str) -> AgyCredential:
 
 def _parse_expiry(value: Any) -> datetime | None:
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        timestamp = float(value)
-        if timestamp > 10_000_000_000:
-            timestamp /= 1000
         try:
+            timestamp = float(value)
+            if timestamp > 10_000_000_000:
+                timestamp /= 1000
             return datetime.fromtimestamp(timestamp, timezone.utc)
         except (OSError, OverflowError, ValueError):
             return None
@@ -104,18 +110,62 @@ def _parse_expiry(value: Any) -> datetime | None:
         return None
 
 
-def _read_command(executable: str, arguments: list[str]) -> str | None:
+def _read_command(
+    executable: str,
+    arguments: list[str],
+    *,
+    timeout: float = 10,
+    cwd: Path | None = None,
+) -> str | None:
     try:
         result = subprocess.run(
             [executable, *arguments],
             check=True,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             text=True,
-            timeout=10,
+            timeout=timeout,
+            cwd=cwd,
         )
-    except (FileNotFoundError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return None
     return _trimmed(result.stdout)
+
+
+def _read_agy_usage(timeout: float) -> dict[str, Any] | None:
+    """Run the read-only usage command on versions with noninteractive support."""
+
+    executable = find_executable("agy")
+    if executable is None:
+        return None
+    executable = os.path.abspath(executable)
+    cwd = Path.home()
+    version = _read_command(executable, ["--version"], timeout=min(5, timeout), cwd=cwd)
+    match = re.fullmatch(r"([0-9]{1,5})\.([0-9]{1,5})\.([0-9]{1,5})", version or "")
+    # Earlier releases may send /usage as a model prompt in print mode.
+    if match is None or tuple(map(int, match.groups())) < JSON_USAGE_MIN_VERSION:
+        return None
+    output = _read_command(
+        executable,
+        ["--output-format", "json", "-p", "/usage"],
+        timeout=timeout,
+        cwd=cwd,
+    )
+    if output is None:
+        return None
+    try:
+        payload = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("status") != "SUCCESS":
+        return None
+    command = payload.get("command")
+    if not isinstance(command, dict) or command.get("name") != "usage":
+        return None
+    data = command.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("groups"), list):
+        return None
+    return data
 
 
 def _read_keyring() -> str | None:
@@ -161,7 +211,7 @@ def load_agy_credential(
         )
         try:
             raw = _trimmed(path.read_text(encoding="utf-8"))
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             raw = None
     if raw is None:
         raise AgyError("Gemini credentials not found. Run agy and sign in.")
@@ -238,7 +288,9 @@ async def _post_internal(
 
 
 async def _fetch_summary(
-    client: httpx.AsyncClient, access_token: str
+    client: httpx.AsyncClient,
+    access_token: str,
+    cli_payload: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], str | None, str]:
     last_error: AgyError = AgyError("No Gemini quota host responded.")
     for host in HOSTS:
@@ -250,6 +302,9 @@ async def _fetch_summary(
                 access_token,
                 {"metadata": {"ideType": "ANTIGRAVITY"}},
             )
+            tier = _tier_name(load)
+            if cli_payload is not None:
+                return cli_payload, tier, host
             project = _trimmed(load.get("cloudaicompanionProject"))
             if project is None:
                 raise AgyError("Gemini loadCodeAssist returned no project.")
@@ -260,7 +315,7 @@ async def _fetch_summary(
                 access_token,
                 {"project": project},
             )
-            return summary, _tier_name(load), host
+            return summary, tier, host
         except AgyAuthenticationError:
             raise
         except AgyError as error:
@@ -287,8 +342,9 @@ def _numeric(value: Any) -> float | None:
         return None
     if isinstance(value, (int, float, str)):
         try:
-            return float(value)
-        except ValueError:
+            number = float(value)
+            return number if math.isfinite(number) else None
+        except (ValueError, OverflowError):
             return None
     return None
 
@@ -326,6 +382,7 @@ def _window(bucket: dict[str, Any] | None, kind: str, message: str) -> UsageWind
         kind=kind,
         used_percentage=used,
         resets_at=_reset_date(bucket.get("resetTime")),
+        message=message if used is None else None,
     )
 
 
@@ -337,16 +394,27 @@ def _normalized_groups(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for raw_group in raw_groups:
         if not isinstance(raw_group, dict):
             continue
-        buckets = raw_group.get("buckets")
+        buckets_value = raw_group.get("buckets")
+        raw_buckets = buckets_value if isinstance(buckets_value, list) else []
+        buckets = [
+            {
+                "bucketId": bucket.get("bucketId", bucket.get("id")),
+                "displayName": bucket.get("displayName", bucket.get("name")),
+                "window": bucket.get("window"),
+                "remainingFraction": bucket.get(
+                    "remainingFraction", bucket.get("remaining_fraction")
+                ),
+                "resetTime": bucket.get("resetTime", bucket.get("reset_time")),
+                "disabled": bucket.get("disabled"),
+            }
+            for bucket in raw_buckets
+            if isinstance(bucket, dict)
+        ]
         groups.append(
             {
                 "display_name": _trimmed(raw_group.get("displayName"))
-                or "Gemini Models",
-                "buckets": [
-                    bucket for bucket in buckets or [] if isinstance(bucket, dict)
-                ]
-                if isinstance(buckets, list)
-                else [],
+                or _trimmed(raw_group.get("name")),
+                "buckets": buckets,
             }
         )
     return groups
@@ -356,8 +424,26 @@ def _snapshot(payload: dict[str, Any], tier: str | None) -> ProviderSnapshot:
     groups = _normalized_groups(payload)
     if not groups:
         return _failure("Gemini quota response returned no model groups.")
-    primary = groups[0]
-    primary_buckets = primary["buckets"]
+    primary = next(
+        (
+            group
+            for group in groups
+            if any(
+                (_trimmed(bucket["bucketId"]) or "").lower() in GEMINI_BUCKET_IDS
+                for bucket in group["buckets"]
+            )
+        ),
+        None,
+    )
+    if primary is None:
+        primary = next(
+            (
+                group for group in groups
+                if (group["display_name"] or "").lower() in ("gemini", "gemini models")
+            ),
+            None,
+        )
+    primary_buckets = primary["buckets"] if primary is not None else []
     five_hour = next(
         (bucket for bucket in primary_buckets if _bucket_kind(bucket) == "5h"),
         None,
@@ -367,7 +453,10 @@ def _snapshot(payload: dict[str, Any], tier: str | None) -> ProviderSnapshot:
         None,
     )
     additional_windows: list[ModelUsageWindow] = []
-    for group in groups[1:]:
+    for group in groups:
+        if group is primary:
+            continue
+        group_name = group["display_name"] or "Models"
         for bucket in group["buckets"]:
             kind = _bucket_kind(bucket)
             if kind is None:
@@ -375,13 +464,14 @@ def _snapshot(payload: dict[str, Any], tier: str | None) -> ProviderSnapshot:
             label = _trimmed(bucket.get("displayName")) or kind
             additional_windows.append(
                 ModelUsageWindow(
-                    model_name=f"{group['display_name']} · {label}",
+                    model_name=f"{group_name} · {label}",
                     window=_window(bucket, kind, "Quota unavailable."),
                 )
             )
-    detail = " · ".join(
-        value for value in (primary["display_name"], tier) if value
+    primary_name = (
+        primary["display_name"] or "Gemini Models" if primary is not None else None
     )
+    detail = " · ".join(value for value in (primary_name, tier) if value)
     return ProviderSnapshot(
         provider="Gemini",
         five_hour=_window(
@@ -411,11 +501,17 @@ async def fetch_gemini_usage(
     raw_keyring: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> ProviderSnapshot:
-    """Return Gemini weekly and five-hour usage through agy's quota service."""
+    """Read Gemini quota from agy, with direct OAuth for headless setups."""
 
+    cli_payload = None
+    default_context = all(
+        value is None for value in (credential, home, environment, raw_keyring, transport)
+    )
+    if default_context and not _trimmed(os.environ.get("AGY_OAUTH_TOKEN_FILE")):
+        cli_payload = await asyncio.to_thread(_read_agy_usage, timeout)
     try:
-        credential = credential or load_agy_credential(
-            home, environment, raw_keyring
+        credential = credential or await asyncio.to_thread(
+            load_agy_credential, home, environment, raw_keyring
         )
         async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
             access_token = credential.access_token
@@ -424,12 +520,14 @@ async def fetch_gemini_usage(
                     client, credential.refresh_token
                 )
             try:
-                payload, tier, _ = await _fetch_summary(client, access_token)
+                payload, tier, _ = await _fetch_summary(client, access_token, cli_payload)
             except AgyAuthenticationError:
                 access_token = await _refresh_access_token(
                     client, credential.refresh_token
                 )
-                payload, tier, _ = await _fetch_summary(client, access_token)
+                payload, tier, _ = await _fetch_summary(client, access_token, cli_payload)
         return _snapshot(payload, tier)
     except (AgyError, httpx.HTTPError) as error:
+        if cli_payload is not None:
+            return _snapshot(cli_payload, None)
         return _failure(str(error))

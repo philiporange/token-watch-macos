@@ -59,16 +59,17 @@ Enable auto-apply in only one place, the Mac app or the server, at a time.
 For z.ai, add `ZAI_API_KEY=your_key` to `~/.env`. The server never reads
 `ANTHROPIC_AUTH_TOKEN` for z.ai.
 
-For Gemini, sign in with `agy`. The server reads service `gemini`, account
-`antigravity` from macOS Keychain or Linux Secret Service, with
-`~/.gemini/antigravity-cli/antigravity-oauth-token` as the headless fallback.
-Set `AGY_OAUTH_TOKEN_FILE` to override the token-file path. Expired access
-tokens are refreshed in memory and are not written back to agy's credential.
+For Gemini, sign in with `agy`. With version 1.1.11 or later, the server reads
+the JSON output of the built-in `/usage` command. The main windows show the
+shared Gemini Models quota. Separately metered groups appear in `model_windows`.
 
-Gemini quota collection uses Google's private `loadCodeAssist` and
-`retrieveUserQuotaSummary` endpoints. They are undocumented and unstable; the
-supported alternative is `/usage` inside `agy`, and direct polling should be
-treated as account-sensitive.
+The server reads the plan name through Google's `loadCodeAssist` endpoint.
+If the CLI reading is unavailable or `AGY_OAUTH_TOKEN_FILE` is set, it also
+requests quota through `retrieveUserQuotaSummary`. These private endpoints use
+agy’s credential from macOS Keychain or Linux Secret Service (service `gemini`,
+account `antigravity`). On headless systems the default token file is
+`~/.gemini/antigravity-cli/antigravity-oauth-token`. Set `AGY_OAUTH_TOKEN_FILE`
+to override that file path. The server refreshes expired access tokens in memory.
 
 For Muse, sign in with `muse login`. The server reads `~/.config/muse/auth.json`
 (respecting `XDG_CONFIG_HOME`) or falls back to macOS Keychain service
