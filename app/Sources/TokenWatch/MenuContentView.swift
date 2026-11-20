@@ -67,7 +67,7 @@ struct MenuContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            cardGrid
+            cardColumns
             footer
         }
         .frame(width: store.visibleSnapshots.count > 1 ? 858 : 440)
@@ -76,16 +76,17 @@ struct MenuContentView: View {
 
     // MARK: Cards
 
-    private var cardGrid: some View {
+    private var cardColumns: some View {
         let snapshots = store.visibleSnapshots
-        return VStack(spacing: 10) {
+        return Group {
             if snapshots.isEmpty {
                 emptyCard
             } else {
-                Grid(alignment: .topLeading, horizontalSpacing: 10, verticalSpacing: 10) {
-                    ForEach(Array(stride(from: 0, to: snapshots.count, by: 2)), id: \.self) { row in
-                        GridRow {
-                            ForEach(snapshots[row..<min(row + 2, snapshots.count)], id: \.provider) { snapshot in
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(0..<min(2, snapshots.count), id: \.self) { column in
+                        let cards = stride(from: column, to: snapshots.count, by: 2).map { snapshots[$0] }
+                        VStack(spacing: 10) {
+                            ForEach(cards, id: \.provider) { snapshot in
                                 ProviderCard(
                                     store: store,
                                     snapshot: snapshot,
