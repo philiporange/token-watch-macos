@@ -24,7 +24,7 @@ private extension View {
 /// - The day part appears only when there is at least one day.
 /// - The hour part appears when nonzero, or whenever a day part is shown.
 /// - Minutes are always rendered as two digits.
-private func countdownText(to date: Date, now: Date = Date()) -> String {
+private func countdownText(to date: Date, now: Date) -> String {
     let interval = date.timeIntervalSince(now)
     if interval < 60 {
         return "<1m"
@@ -444,10 +444,12 @@ private struct UsageRowView: View {
     @ViewBuilder
     private var countdownView: some View {
         if let resetsAt = window.resetsAt {
-            Text(countdownText(to: resetsAt))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .frame(width: 86, alignment: .trailing)
+            TimelineView(.everyMinute) { tick in
+                Text(countdownText(to: resetsAt, now: tick.date))
+            }
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .frame(width: 86, alignment: .trailing)
         }
     }
 }
